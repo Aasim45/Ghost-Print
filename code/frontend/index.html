@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#080d16" />
+  <title>GHOSTPRINTS — Deletion Intelligence</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <a class="brand" href="#dashboard" aria-label="GHOSTPRINTS home"><span class="brand-mark">G</span><span>GHOSTPRINTS<small>DELETION INTELLIGENCE</small></span></a>
+      <div class="nav-label">WORKSPACE</div>
+      <nav>
+        <a href="#dashboard" data-view="dashboard" class="nav-link active"><span>◫</span> Overview</a>
+        <a href="#investigations" data-view="investigations" class="nav-link"><span>⌕</span> Investigations <b id="case-count">—</b></a>
+        <a href="#graph" data-view="graph" class="nav-link"><span>⌘</span> Ghost Graph</a>
+        <a href="#risks" data-view="risks" class="nav-link"><span>△</span> Risk analysis</a>
+        <a href="#remediation" data-view="remediation" class="nav-link"><span>✓</span> Remediation</a>
+      </nav>
+      <div class="nav-label data-label">DATA &amp; REPORTS</div>
+      <nav>
+        <a href="#dataset" data-view="dataset" class="nav-link"><span>▤</span> Dataset manager</a>
+        <a href="#reports" data-view="reports" class="nav-link"><span>⇩</span> Reports &amp; export</a>
+      </nav>
+      <div class="sidebar-foot"><span class="live-dot"></span><span>Local evidence workspace<small id="api-status">Connecting to API…</small></span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><button class="menu" id="menu" aria-label="Toggle navigation">☰</button><div class="breadcrumbs">Workspace <span>/</span> <strong id="crumb">Overview</strong></div><div class="top-actions"><span class="secure"><i></i> EVIDENCE MODE</span><span class="avatar">GP</span></div></header>
+      <section class="content" id="app"><div class="loading"><span class="spinner"></span> Loading investigation workspace…</div></section>
+      <footer>GHOSTPRINTS <span>•</span> Participant dataset · Read-only evidence review</footer>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>
