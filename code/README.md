@@ -51,6 +51,7 @@ The browser service adapter is `frontend/api.js`; illustrative display-only exam
 - `GET /api/investigations/{case_id}`
 - `GET /api/investigations/{case_id}/identity|findings|remediation|verification|graph|risks|certificate`
 - `GET /api/investigations/{case_id}/evidence|timeline`
+- `GET /api/investigations/{case_id}/graph` (unique resource observations and only explicitly evidenced resource-to-resource relationships)
 - `POST /api/investigations/{case_id}/ai-explanation` (optional, user-triggered AI explanation)
 - `GET /api/datasets/official-challenge`
 - `POST /api/datasets/upload` (validated, quarantined upload)
@@ -58,6 +59,12 @@ The browser service adapter is `frontend/api.js`; illustrative display-only exam
 - `GET /api/reports/export`
 
 The UI consumes service responses through `GhostguardAPI`; mock records are not coupled to components. The backend returns evidence-linked observation nodes and only emits a lineage edge when a source record explicitly names both endpoints and a relationship. The case risk band is a disclosed prioritization heuristic, not a legal privacy guarantee.
+
+### Data Lineage
+
+The browser renders the backend graph with a dependency-free SVG view. The case selector loads the full investigation list; each selected case requests its own graph. Resource nodes are deduplicated by the stable `(system_id, resource_id)` pair, retain all associated evidence references, and keep presence state separate from verification status. Nodes can be selected and dragged, the canvas can be panned or wheel-zoomed, and **Reset / fit** fits the current case graph. The API accepts only explicit relationship records with both resource endpoints and a relationship type, and omits edges whose endpoints are absent, ambiguous, or self-referencing. If the evidence does not describe such a relationship, the UI displays the resources independently and says no verified resource-to-resource relationships were found. It does not infer links from matching system names or activity alone.
+
+The repository’s participant evidence currently has resource observations but no explicit resource-to-resource endpoint fields for case `case_34`; its graph therefore correctly has one unique support resource and no edges. The optional FastAPI backend uses the same response shape for nodes and supported edges. Its graph is built from the evidence-backed findings and verification steps returned by its audit engine.
 
 Evidence matching, policy coverage, OCR support, and temporal reconstruction have known limitations; see `evaluation/evaluation_report.md`. Structural output validation does not establish prediction accuracy.
 

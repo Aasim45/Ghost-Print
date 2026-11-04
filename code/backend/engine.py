@@ -239,7 +239,7 @@ class AuditEngine:
                 for line in evidence["content"].splitlines():
                     if not any(identifier and identifier in normalized(line) for identifier in identifiers):
                         continue
-                    match = re.search(r"\b(?:account|search|support|analytics|export|backup|tombstone|data_flow|audit_record)_[\w-]+\b", line, re.I)
+                    match = re.search(r"\b(?:account|search|support|analytics|export|backup|tombstone|data_flow|audit_record)_[0-9][\w-]*\b", line, re.I)
                     if match:
                         inline={"resource_id":match.group(),"line":line}
                         email_match=re.search(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}",line)
@@ -331,16 +331,77 @@ class AuditEngine:
         return out
 
     def _make_result(self, case_id, status, request, identity, steps, findings, explanation):
-        graph=nx.MultiDiGraph()
+        evidence_by_id={item.get("file_id"):item for item in self.manifest}
+        node_map={}
+        def add_node(system, resource, state, evidence_id, category="", record=None):
+            system=str(system or "unknown"); resource=str(resource or "")
+            if not resource or not evidence_id:
+                return
+            node_id=f"{system}::{resource}"; node=node_map.get(node_id)
+            if node is None:
+                node={"id":node_id,"system_id":system,"resource_id":resource,
+                      "resource_name":str((record or {}).get("resource_name") or (record or {}).get("resource_label") or category or "Observed resource")[:120],
+                      "resource_type":str(category or (record or {}).get("record_type") or "Not available")[:80],
+                      "presence_status":str(state or "UNKNOWN").upper(),"verification_status":"UNKNOWN",
+                      "verification_operation":"","evidence_ids":[],"evidence":[],"last_observed_at":"",
+                      "audit_status":status,"audit_cutoff":request.get("audit_at", ""),"reason":""}
+                node_map[node_id]=node
+            elif state and node["presence_status"]=="UNKNOWN":
+                node["presence_status"]=str(state).upper()
+            if evidence_id not in node["evidence_ids"]:
+                node["evidence_ids"].append(evidence_id)
+                file=evidence_by_id.get(evidence_id,{})
+                filename=Path(file.get("file_path", "")).name
+                node["evidence"].append({"evidence_id":evidence_id,
+                    "description":" · ".join(x for x in (file.get("origin", ""),filename) if x) or "Evidence metadata unavailable",
+                    "file_path":file.get("file_path", ""),"observed_at":file.get("captured_at", "")})
+            record=record or {}
+            observed=next((str(record.get(k)) for k in ("observed_at","recorded_at","event_time","timestamp","updated_at") if record.get(k)),"")
+            observed=observed or str(evidence_by_id.get(evidence_id,{}).get("captured_at", ""))
+            if observed and (not node["last_observed_at"] or observed>node["last_observed_at"]):
+                node["last_observed_at"]=observed
+            verification=next((s for s in steps if s.get("phase")=="VERIFICATION" and s.get("system_id")==system and s.get("resource_id")==resource and s.get("evidence_id") and s.get("operation","").startswith("VERIFY_")),None)
+            pending=any(s.get("phase")=="REMEDIATION" and s.get("system_id")==system and s.get("resource_id")==resource for s in steps)
+            if verification:
+                node["verification_status"]="VERIFIED";node["verification_operation"]=verification["operation"]
+                if verification.get("state"):node["presence_status"]=verification["state"]
+            elif pending or any(f.get("system_id")==system and f.get("resource_id")==resource for f in findings):
+                node["verification_status"]="PENDING"
+            else:
+                node["verification_status"]="EVIDENCE_UNAVAILABLE" if not node["evidence_ids"] else "UNKNOWN"
+
+        relations=[]
         for finding in findings:
-            node=f"{finding['system_id']}:{finding['resource_id']}"
-            graph.add_node(node,id=node,label=finding["resource_id"],system_id=finding["system_id"],state=finding["state"],evidence_id=finding["evidence_id"])
             record=finding.get("_record",{})
-            source,target=record.get("source_resource_id"),record.get("target_resource_id")
-            relation=record.get("relationship",record.get("event_type"))
-            if source and target and relation:
-                graph.add_edge(source,target,type=str(relation).upper(),evidence_id=finding["evidence_id"])
-        graph_data={"nodes":[dict(v) for _,v in graph.nodes(data=True)],"edges":[{"source":u,"target":v,**data} for u,v,data in graph.edges(data=True)]}
+            add_node(finding.get("system_id"),finding.get("resource_id"),finding.get("state"),finding.get("evidence_id"),finding.get("data_category",""),record)
+            node=node_map.get(f"{finding.get('system_id') or 'unknown'}::{finding.get('resource_id') or ''}")
+            if node and finding.get("reason"):node["reason"]=finding["reason"]
+            source=record.get("source_resource_id") or record.get("from_resource_id") or record.get("parent_resource_id")
+            target=record.get("target_resource_id") or record.get("to_resource_id") or record.get("child_resource_id")
+            relation=record.get("relationship_type") or record.get("relation_type") or record.get("relationship") or record.get("transfer_type") or record.get("event_type")
+            if source and target and isinstance(relation,str) and relation.strip():
+                relations.append({"source_resource_id":str(source),"target_resource_id":str(target),"source_system_id":record.get("source_system_id") or record.get("source_system"),"target_system_id":record.get("target_system_id") or record.get("target_system"),"type":relation.strip().upper()[:80],"evidence_id":finding.get("evidence_id"),"allow_self":record.get("allow_self_relationship") is True})
+        for step in steps:
+            if step.get("evidence_id"):
+                add_node(step.get("system_id"),step.get("resource_id"),step.get("state"),step.get("evidence_id"))
+        by_resource={}
+        for node in node_map.values():by_resource.setdefault(node["resource_id"],[]).append(node)
+        def endpoint(resource,system):
+            if system:
+                candidate=node_map.get(f"{system}::{resource}")
+                if candidate:return candidate["id"]
+            options=by_resource.get(resource,[])
+            return options[0]["id"] if len(options)==1 else None
+        edges={}
+        for rel in relations:
+            source=endpoint(rel["source_resource_id"],rel["source_system_id"]);target=endpoint(rel["target_resource_id"],rel["target_system_id"])
+            if not source or not target or (source==target and not rel["allow_self"]):continue
+            edge={"id":"|".join((source,target,rel["type"],rel["evidence_id"] or "")),"source":source,"target":target,"type":rel["type"],"evidence_id":rel["evidence_id"] or "","description":evidence_by_id.get(rel["evidence_id"],{}).get("file_path","Evidence metadata unavailable")}
+            edges[edge["id"]]=edge
+        nodes=sorted(node_map.values(),key=lambda n:(n["system_id"],n["resource_id"]))
+        graph_edges=sorted(edges.values(),key=lambda e:(e["source"],e["target"],e["type"]))
+        graph_data={"case_id":case_id,"audit_status":status,"audit_cutoff":request.get("audit_at", ""),"nodes":nodes,"edges":graph_edges,
+                    "relationship_status":"Evidence-supported relationships found" if graph_edges else "No verified resource-to-resource relationships were found for this case."}
         risk=self.risk(steps)
         safe_findings=[{k:v for k,v in finding.items() if k!="_record"} for finding in findings]
         return {"case_id":case_id,"deletion_status":status,"request":request,"identity":identity,"steps":steps,"findings":safe_findings,

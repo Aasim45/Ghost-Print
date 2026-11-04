@@ -180,7 +180,10 @@ def verification(case_id: str):
 
 @app.get("/api/investigations/{case_id}/graph")
 def lineage(case_id: str):
-    return get_case(case_id)["graph"]
+    case=get_case(case_id)
+    # Recompute the graph so saved pre-lineage SQLite payloads cannot return the old
+    # resource-id-only node shape or edges whose endpoints are not in the case graph.
+    return service().analyze(case["request"])["graph"]
 
 
 @app.get("/api/investigations/{case_id}/risks")

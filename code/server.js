@@ -115,7 +115,7 @@ function observations(profile, evidence) {
   else for(const line of evidence.text.split(/\r?\n/)){
     const terms=[...wanted].filter(x=>x&&line.toLocaleLowerCase('en-US').includes(x));
     if(!terms.length)continue;
-    const ids=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[A-Za-z0-9_-]+\b/g)||[];
+    const ids=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[0-9][A-Za-z0-9_-]*\b/g)||[];
     for(const resource of new Set(ids))out.push({resource,object:{line},hits:terms.map(value=>['identifier',value])});
   }
   return out;
@@ -126,6 +126,68 @@ function sortSteps(steps) {
   return steps.sort((a,b) => phase[a.phase]-phase[b.phase] || operationRank.get(a.operation)-operationRank.get(b.operation) || a.system_id.localeCompare(b.system_id) || a.resource_id.localeCompare(b.resource_id));
 }
 function makeStep(phase, system, resource, operation, state, evidence) { return { step_no: 0, phase, system_id: system || 'unknown', resource_id: resource || 'unknown', operation, state, evidence_id: evidence || '' }; }
+const RESOURCE_ID_RE=/^(?:account|search|support|analytics|telemetry|export|backup|audit_record|data_flow|archive|cache|replica|attachment|message|job|marketing|tombstone)_[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*$/i;
+function isResourceId(value){return typeof value==='string'&&RESOURCE_ID_RE.test(value);}
+function lineageState(record) {
+  const direct=[record?.record_state,record?.state,record?.status,record?.deletion_state,record?.operation_result,record?.result].filter(x=>typeof x==='string').join(' ').toUpperCase();
+  const line=typeof record?.line==='string'?record.line.toUpperCase():'';const text=`${direct} ${line}`;
+  for(const state of ['ANONYMIZED','ANONYMISED','REDACTED','NOT_FOUND','ABSENT','DELETED','IDENTIFIABLE','PRESENT','FOUND','ACTIVE','ENABLED','RUNNING','RESTORABLE','AVAILABLE','BLOCKED','DISABLED']) if(new RegExp(`\\b${state}\\b`).test(text)) return state==='NOT_FOUND'||state==='DELETED'?'ABSENT':state;
+  return 'UNKNOWN';
+}
+function relationCandidates(record,evidenceId,out=[]) {
+  if(Array.isArray(record)){for(const value of record)relationCandidates(value,evidenceId,out);return out;}
+  if(!record||typeof record!=='object')return out;
+  const source=record.source_resource_id||record.from_resource_id||record.parent_resource_id;
+  const target=record.target_resource_id||record.to_resource_id||record.child_resource_id;
+  const type=record.relationship_type||record.relation_type||record.relationship||record.transfer_type||record.event_type;
+  if(isResourceId(source)&&isResourceId(target)&&typeof type==='string'&&type.trim())out.push({source_resource_id:source,target_resource_id:target,type:type.trim().slice(0,80),evidence_id:evidenceId,source_system_id:record.source_system_id||record.source_system||'',target_system_id:record.target_system_id||record.target_system||'',allow_self:record.allow_self_relationship===true});
+  for(const value of Object.values(record))if(value&&typeof value==='object')relationCandidates(value,evidenceId,out);
+  return out;
+}
+function buildLineageGraph(caseResult,request,observations,evidenceFiles) {
+  const caseId=caseResult.case_id,cutoff=request?.audit_at||'', evidenceById=new Map(evidenceFiles.map(x=>[x.file_id,x]));
+  const nodeMap=new Map(),related=[];const key=(system,resource)=>`${system}::${resource}`;
+  const findingIndex=new Map();for(const f of caseResult.findings||[]){const resource=f.resource||f.resource_id,system=f.system||f.system_id;if(isResourceId(resource))findingIndex.set(key(system||'unknown',resource),f);}
+  const stepIndex=new Map();for(const s of caseResult.steps||[]){if(!isResourceId(s.resource_id))continue;const k=key(s.system_id||'unknown',s.resource_id);if(!stepIndex.has(k))stepIndex.set(k,[]);stepIndex.get(k).push(s);}
+  const add=(system,resource,record,evidenceId,category,observedAt)=>{
+    system=String(system||'unknown');resource=String(resource||'');if(!isResourceId(resource))return;
+    const id=key(system,resource),f=findingIndex.get(id),steps=stepIndex.get(id)||[];let node=nodeMap.get(id);
+    if(!node){
+      category=category||f?.category||f?.data_category||'';
+      const name=record?.resource_name||record?.resource_label||category||'Observed resource';
+      node={id,system_id:system,resource_id:resource,resource_name:String(name).slice(0,120),resource_type:String(category||record?.record_type||'Not available').slice(0,80),presence_status:'UNKNOWN',verification_status:'UNKNOWN',verification_operation:'',evidence_ids:[],evidence:[],last_observed_at:'',audit_status:caseResult.deletion_status,audit_cutoff:cutoff,reason:f?.reason||''};nodeMap.set(id,node);
+    }
+    const state=lineageState(record);if(state!=='UNKNOWN')node.presence_status=state;
+    if(f?.state)node.presence_status=f.state;
+    if(evidenceId&&!node.evidence_ids.includes(evidenceId)){
+      node.evidence_ids.push(evidenceId);const file=evidenceById.get(evidenceId);
+      if(file){const label=[file.origin,path.basename(file.file_path||'')].filter(Boolean).join(' · ');node.evidence.push({evidence_id:evidenceId,description:label||'Evidence metadata unavailable',file_path:file.file_path||'',observed_at:file.captured_at||''});}
+    }
+    const timestamp=String(observedAt||'');if(timestamp&&(!node.last_observed_at||iso(timestamp)>iso(node.last_observed_at)))node.last_observed_at=timestamp;
+    const verify=steps.find(s=>s.phase==='VERIFICATION'&&s.evidence_id&&/^VERIFY_/.test(s.operation));
+    const pending=steps.some(s=>s.phase==='REMEDIATION')||Boolean(f);
+    if(verify){node.verification_status='VERIFIED';node.verification_operation=verify.operation;if(['ABSENT','REDACTED','ANONYMIZED','PRESENT','DISABLED','BLOCKED'].includes(verify.state))node.presence_status=verify.state;}
+    else if(pending)node.verification_status='PENDING';
+    else if(!node.evidence_ids.length)node.verification_status='EVIDENCE_UNAVAILABLE';
+    if(record&&typeof record==='object'&&evidenceId)related.push(...relationCandidates(record,evidenceId));
+  };
+  for(const observation of observations){
+    const {evidence,resource,object}=observation;const resourceId=String(object?.resource_id||resource||'');
+    if(!isResourceId(resourceId))continue;
+    const system=observation.system_id||object?.system_id||object?.system||object?.origin_system||object?.source_system||'unknown';
+    const category=object?.data_category||object?.category||object?.record_type||'';
+    const time=object?.observed_at||object?.recorded_at||object?.event_time||object?.timestamp||object?.updated_at||evidence?.captured_at||'';
+    add(system,resourceId,object,evidence?.file_id,category,time);
+  }
+  for(const step of caseResult.steps||[])if(step.evidence_id)add(step.system_id,step.resource_id,null,step.evidence_id,'',evidenceById.get(step.evidence_id)?.captured_at||'');
+  const byResource=new Map();for(const n of nodeMap.values()){if(!byResource.has(n.resource_id))byResource.set(n.resource_id,[]);byResource.get(n.resource_id).push(n);}
+  const resolve=(resource,system)=>{if(system){const n=nodeMap.get(key(system,resource));if(n)return n.id;}const options=byResource.get(resource)||[];return options.length===1?options[0].id:null;};
+  const edgeMap=new Map();for(const rel of related){const source=resolve(rel.source_resource_id,rel.source_system_id),target=resolve(rel.target_resource_id,rel.target_system_id);if(!source||!target||(source===target&&!rel.allow_self))continue;const id=[source,target,rel.type,rel.evidence_id].join('|');edgeMap.set(id,{id,source,target,type:rel.type,evidence_id:rel.evidence_id,description:evidenceById.get(rel.evidence_id)?.file_path||'Evidence metadata unavailable'});}
+  const nodes=[...nodeMap.values()].sort((a,b)=>a.system_id.localeCompare(b.system_id)||a.resource_id.localeCompare(b.resource_id));
+  for(const node of nodes){if(node.evidence.length){const first=node.evidence[0];node.evidence_id=first.evidence_id;node.evidence_description=first.description;}else{node.evidence_id='';node.evidence_description='Not available';}node.last_observed_at=node.last_observed_at||node.evidence[0]?.observed_at||'';}
+  const edges=[...edgeMap.values()].sort((a,b)=>a.source.localeCompare(b.source)||a.target.localeCompare(b.target)||a.type.localeCompare(b.type));
+  return {case_id:caseId,audit_status:caseResult.deletion_status,audit_cutoff:cutoff,nodes,edges,relationship_status:edges.length?'Evidence-supported relationships found':'No verified resource-to-resource relationships were found for this case.'};
+}
 function explainFinding(finding, policyAction = '') {
   const treatment=policyAction||({REPORT_REMAINING_RECORD:'DELETE',REPORT_EXPOSED_PII:'REDACT'}[finding.op]||'REVIEW');
   const action=({REPORT_ACTIVE_DATA_FLOW:'DISABLE_DATA_FLOW',REPORT_RESTORE_RISK:'BLOCK_RESTORE'}[finding.op]||treatment);
@@ -180,7 +242,7 @@ class Ghostprints {
           }
           const candidates=[...(line.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g)||[]),...(line.match(/\buser_\d+\b/gi)||[]),...(line.match(/\b[a-f0-9]{64}\b/gi)||[]),...(line.match(/\+?[\d][\d ()-]{7,}\d/g)||[])];
           if(!candidates.length)continue;
-          const resources=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[A-Za-z0-9_-]+\b/g)||[];
+          const resources=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[0-9][A-Za-z0-9_-]*\b/g)||[];
           for(const resource of new Set(resources))add(e,resource,{line},candidates);
         }
       }
@@ -264,7 +326,14 @@ class Ghostprints {
     return (map.find(([p])=>resource.startsWith(p))||[])[1] || (context.match(/(?:account_service|search_service|support_platform|analytics_platform|security_service|backup_service|export_service|integration_service|identity_service)/)||[])[0] || 'unknown';
   }
   policyAction(category) { return this.rules.find(r=>r.data_category.toUpperCase()===String(category).toUpperCase())?.required_action.toUpperCase()||''; }
-  all() { return this.requests.map(r=>this.results.get(r.case_id)||this.analyze(r)); }
+  lineage(caseResult,request) {
+    const cutoff=iso(request?.audit_at),profiles=[...this.identities.values()].filter(p=>identifiersAt(p,cutoff).has(norm(request?.email)));
+    if(profiles.length!==1)return {case_id:caseResult.case_id,audit_status:caseResult.deletion_status,audit_cutoff:request?.audit_at||'',nodes:[],edges:[],relationship_status:profiles.length?'Identity is ambiguous; resource observations were not combined.':'Identity could not be resolved; no case resources can be safely attributed.'};
+    const identifiers=identifiersAt(profiles[0],cutoff);
+    const observations=(this.observationIndex.get(profiles[0].user_id)||[]).filter(o=>iso(o.evidence.captured_at)<=cutoff&&o.hits.some(([value])=>identifiers.has(norm(value)))).map(o=>({...o,system_id:this.systemFor(o.resource,JSON.stringify(o.object||{}))}));
+    return buildLineageGraph(caseResult,request,observations,this.manifest);
+  }
+  all() { return this.requests.map(r=>{if(!this.results.has(r.case_id))this.results.set(r.case_id,this.analyze(r));return this.results.get(r.case_id);}); }
   run() { for (const r of this.requests) this.results.set(r.case_id,this.analyze(r)); return this.all(); }
   dashboard() {
     const cases=this.all(); const counts={COMPLETE:0,INCOMPLETE:0,NOT_APPLICABLE:0}; cases.forEach(c=>counts[c.deletion_status]++);
@@ -320,7 +389,7 @@ const server = http.createServer((req,res)=>{
     if(parts[3]==='certificate') return json(200,{case_id:c.case_id,eligible:c.deletion_status==='COMPLETE',evidence_ids:evidenceIds,hash_scope:'recorded evidence references and step metadata'});
     if(parts[3]==='evidence') return json(200,{case_id:c.case_id,items:c.steps.map(s=>s.evidence_id).filter(Boolean).map(id=>app.manifest.find(f=>f.file_id===id)).filter(Boolean)});
     if(parts[3]==='timeline') return json(200,{case_id:c.case_id,request:app.requests.find(x=>x.case_id===c.case_id),steps:c.steps});
-    if(parts[3]==='graph') return json(200,{nodes:c.steps.filter(s=>s.evidence_id).map(s=>({id:s.resource_id,label:s.resource_id,system_id:s.system_id,state:s.state,evidence_id:s.evidence_id})),edges:[]});
+    if(parts[3]==='graph'&&req.method==='GET') return json(200,app.lineage(c,request));
     if(parts[3]==='risks') return json(200,c.steps.filter(s=>s.phase==='FINDING'));
     if(parts[3]==='remediation') return json(200,c.steps.filter(s=>s.phase!=='FINDING'));
     return json(200,{...c,request:app.requests.find(x=>x.case_id===c.case_id)});
@@ -372,4 +441,4 @@ if (require.main===module) {
     server.listen(PORT);
   }
 }
-module.exports={Ghostprints,csv,deletionIntent,parseSqlValues,parseSqlSchema,explainFinding};
+module.exports={Ghostprints,csv,deletionIntent,parseSqlValues,parseSqlSchema,explainFinding,buildLineageGraph,isResourceId};
