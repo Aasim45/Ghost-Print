@@ -3,28 +3,31 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#f7f8fa" />
-  <title>GHOSTGUARD — Data Deletion Intelligence</title>
+  <meta name="theme-color" content="#100e11" />
+  <meta name="color-scheme" content="dark" />
+  <title>GHOSTGUARD — A Forensic Record</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500;1,600&family=Instrument+Sans:wght@400;500;600;700&family=Pinyon+Script&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/premium.css" />
 </head>
 <body>
+  <div class="ambient-dust" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
   <div class="app-shell">
     <aside class="sidebar" id="sidebar">
       <a class="brand" href="#overview"><span class="brand-mark">G</span><span class="brand-copy"><b>GHOSTGUARD</b><small>Data Deletion Intelligence</small></span></a>
       <div class="nav-label">WORKSPACE</div>
       <nav class="nav-group" aria-label="Main navigation">
-        <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon">◫</span>Overview</a>
-        <a href="#audits" data-view="audits" class="nav-link"><span class="nav-icon">⌕</span>Deletion Audits <b id="case-count">—</b></a>
-        <a href="#lineage" data-view="lineage" class="nav-link"><span class="nav-icon">⌘</span>Data Lineage</a>
-        <a href="#risk" data-view="risk" class="nav-link"><span class="nav-icon">△</span>Risk Analysis</a>
-        <a href="#certificates" data-view="certificates" class="nav-link"><span class="nav-icon">▤</span>Certificates</a>
-        <a href="#reports" data-view="reports" class="nav-link"><span class="nav-icon">↗</span>Reports</a>
+        <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1"/><rect x="13.5" y="3.5" width="7" height="4" rx="1"/><rect x="13.5" y="10.5" width="7" height="10" rx="1"/><rect x="3.5" y="13.5" width="7" height="7" rx="1"/></svg></span>Overview</a>
+        <a href="#audits" data-view="audits" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5M8.5 10.8h4.6M10.8 8.5v4.6"/></svg></span>Deletion Audits <b id="case-count">—</b></a>
+        <a href="#lineage" data-view="lineage" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="6" r="2"/><circle cx="18.5" cy="5" r="2"/><circle cx="12" cy="18.5" r="2"/><path d="m7 6 9.5-.8M6.2 7.8l4.5 8.8m6.2-9.7-4 9.7"/></svg></span>Data Lineage</a>
+        <a href="#risk" data-view="risk" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 21 20H3z"/><path d="M12 9v4.5m0 3h.01"/></svg></span>Risk Analysis</a>
+        <a href="#certificates" data-view="certificates" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h9l4 4V20H6z"/><path d="M14.5 3.5V8h4.5M9 12h7m-7 3h7m-7 3h4"/></svg></span>Certificates</a>
+        <a href="#reports" data-view="reports" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19.5V4.5m0 15h16"/><path d="m7.5 15 4-4 3 2 5-6"/><path d="M16.5 7H20v3.5"/></svg></span>Reports</a>
       </nav>
       <div class="nav-label settings-label">PREFERENCES</div>
-      <nav class="nav-group"><a href="#settings" data-view="settings" class="nav-link"><span class="nav-icon">⚙</span>Settings</a></nav>
+      <nav class="nav-group"><a href="#settings" data-view="settings" class="nav-link"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.2 13.7a7.4 7.4 0 0 0 0-3.4l1.4-1.1-1.7-3-1.7.7a7.7 7.7 0 0 0-2.9-1.7L14 3.5h-4l-.3 1.8a7.7 7.7 0 0 0-2.9 1.7l-1.7-.7-1.7 3 1.4 1.1a7.4 7.4 0 0 0 0 3.4l-1.4 1.1 1.7 3 1.7-.7a7.7 7.7 0 0 0 2.9 1.7l.3 1.8h4l.3-1.8a7.7 7.7 0 0 0 2.9-1.7l1.7.7 1.7-3z"/></svg></span>Settings</a></nav>
       <div class="sidebar-spacer"></div>
       <div class="user-card"><span class="avatar">SA</span><span><b>Security Administrator</b><small>System Auditor</small></span><button class="icon-button" id="profile-menu" title="Profile settings">···</button></div>
       <div class="connection"><i class="status-dot"></i><span>Evidence workspace<small id="api-status">Connecting…</small></span></div>
@@ -39,9 +42,11 @@
       <footer><span>GHOSTGUARD</span><i></i> Evidence-backed deletion review <span class="footer-right">Illustrative risk indicators · No external systems modified</span></footer>
     </main>
   </div>
+  <canvas class="cinematic-cursor-layer" id="cinematic-cursor-layer" aria-hidden="true"></canvas>
   <div id="toast-root" aria-live="polite"></div>
   <script src="/demo-data.js"></script>
   <script src="/api.js"></script>
+  <script src="/pattern-waves-widget.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
