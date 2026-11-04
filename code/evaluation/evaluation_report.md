@@ -2,11 +2,11 @@
 
 ## Evaluation scope
 
-The implementation includes deterministic request classification, current and historical identifier lookup, a cutoff-aware evidence reader, resource observations, policy-action lookup, and required output serialization. Only public participant-facing files are read. The organizer's evaluation entry point is not an answer source and was not used.
+The repository now includes a FastAPI backend with SQLite persistence, deterministic request classification, time-bounded identity lookup, JSON/text/PDF/image readers, an isolated in-memory reader for official SQL snapshots, policy lookup, and required output serialization. Only participant-facing dataset files are used. Organizer evaluation sources were not inspected or used. The FastAPI backend has not been executed in this environment because Python is not installed.
 
 ## Measured public-sample metrics
 
-The deterministic implementation was run against all 32 public rows in `sample_deletion_requests.csv`, compared with `sample_output.csv`, using `node code/server.js --evaluate-sample`.
+The previous Node backend was run against all 32 public rows in `sample_deletion_requests.csv`, compared with `sample_output.csv`, using `node code/server.js --evaluate-sample`. These results are a baseline for the earlier Node implementation; they are not measurements of the new FastAPI backend.
 
 | Metric | Result |
 |---|---:|
@@ -15,7 +15,7 @@ The deterministic implementation was run against all 32 public rows in `sample_d
 | Exact step accuracy | 3 / 193 expected steps (1.55%) |
 | Step-field accuracy | 286 / 567 compared fields (50.44%) |
 
-These results are weak, especially for step sequence. They show that this prototype is not ready to claim challenge-quality predictions. No hidden-answer or full-dataset accuracy is claimed. Use `node code/server.js --export` to write an experimental output, then `node code/validate-output.js` for structural validation only.
+These results are weak, especially for step sequence. No hidden-answer accuracy is claimed. The FastAPI backend requires a fresh public-sample evaluation and output validation before it should be used to submit predictions.
 
 ## Team-designed test cases
 
@@ -28,11 +28,11 @@ These checks are implemented in `test/server.test.js` and run with `node --test 
 
 ## Known failures and next improvements
 
-- PDF and image artifacts are inventoried but not OCR/text-extracted. SQL files are treated as text and are not executed; robust table-aware snapshot reconstruction is still needed.
+- Image OCR depends on a local Tesseract binary and can be unavailable. PDF text extraction and SQL snapshot parsing are implemented but have not been run here.
 - Evidence matching currently supports exact normalized values in structured records and matching text lines. It does not resolve every indirect hash, shared support context, legal hold, retention window, or SQL row relationship.
 - The resource-level evidence parser does not yet establish every COPY/SYNC/IMPORT/RESTORE edge. The graph intentionally does not draw unsupported edges.
-- A missing proof yields `INCOMPLETE`, but a complete case requires a supported verification observation. Case accuracy has not been measured, and some borderline request language requires a stronger multilingual classifier.
-- The dataset manager exposes the supplied manifest and missing-file errors. Arbitrary dataset upload is not enabled. No external remediation integration exists; planner items are proposals only.
-- Persistence is in-memory for this local build. Investigation results can be recomputed after restart; SQLite persistence remains future work.
+- A missing proof yields `INCOMPLETE`, but complete status still needs careful verification of every applicable policy requirement. FastAPI case accuracy is unmeasured, and borderline multilingual intent needs a stronger classifier.
+- Uploads are validated and quarantined but do not affect investigations. No external remediation integration exists; planner items are proposals only.
+- FastAPI persists case results in SQLite. Database migration and concurrent batch processing have not been load-tested.
 
-Improvements should prioritize table-aware SQL and structured log readers, PDF/image OCR, policy-complete treatment rules, explicit temporal resource state reconstruction, graph evidence, persistent storage, and systematic comparison against all public sample answers.
+Improvements should prioritize policy-complete treatment rules, explicit temporal resource reconstruction, supported process edges, OCR coverage, and systematic comparison of FastAPI results against all public sample answers.

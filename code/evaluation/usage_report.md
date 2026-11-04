@@ -1,6 +1,6 @@
 # GHOSTGUARD usage and cost report
 
-## Final full-dataset run
+## Model usage
 
 - Provider: None (deterministic local processing)
 - Model: None
@@ -12,4 +12,4 @@
 - Estimated total cost: $0.00
 - Estimated cost per request: $0.00
 
-The application does not call an LLM, so token counts and model costs are zero. A full output is generated with `npm run export`; this report does not claim that export was executed in the authoring environment.
+The deterministic backend does not call an LLM, so token counts and model costs are zero. The FastAPI backend's full-dataset export has not been run in this environment because Python is unavailable; therefore this is not a claim that a FastAPI output was produced or evaluated.

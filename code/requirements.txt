@@ -1,1 +1,11 @@
-﻿# This implementation uses Node.js built-ins; there are no Python packages.
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+pydantic==2.10.6
+pandas==2.2.3
+SQLAlchemy==2.0.38
+networkx==3.4.2
+python-multipart==0.0.20
+pypdf==5.3.1
+Pillow==11.1.0
+pytesseract==0.3.13
+pytest==8.3.4
