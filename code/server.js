@@ -6,7 +6,7 @@ const { fileURLToPath } = require('node:url');
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'dataset');
 const OUTPUT = path.join(ROOT, 'output.csv');
-const PORT = Number(process.env.PORT || 8000);
+let PORT = Number(process.env.PORT || 8000);
 
 function csv(text) {
   const rows = []; let row = [], field = '', quote = false;
@@ -220,7 +220,9 @@ class Ghostprints {
   dashboard() {
     const cases=this.all(); const counts={COMPLETE:0,INCOMPLETE:0,NOT_APPLICABLE:0}; cases.forEach(c=>counts[c.deletion_status]++);
     const findings=cases.flatMap(c=>c.steps.filter(s=>s.phase==='FINDING'));
-    return { total_requests:cases.length, completed:counts.COMPLETE, incomplete:counts.INCOMPLETE, not_applicable:counts.NOT_APPLICABLE, remaining_records:findings.length, active_flows:findings.filter(x=>x.operation==='REPORT_ACTIVE_DATA_FLOW').length, restore_risks:findings.filter(x=>x.operation==='REPORT_RESTORE_RISK').length, by_system:Object.fromEntries([...new Set(findings.map(f=>f.system_id))].map(s=>[s,findings.filter(f=>f.system_id===s).length])), recent:cases.slice(-10) };
+    const riskOf=c=>{const f=c.steps.filter(s=>s.phase==='FINDING');if(f.some(s=>s.operation==='REPORT_RESTORE_RISK'||s.operation==='REPORT_ACTIVE_DATA_FLOW')&&f.length>2)return'CRITICAL';if(f.some(s=>s.operation==='REPORT_RESTORE_RISK'||s.operation==='REPORT_ACTIVE_DATA_FLOW')||f.length>2)return'HIGH';if(f.length)return'MEDIUM';return c.deletion_status==='COMPLETE'?'LOW':'UNKNOWN';};
+    const riskCounts={LOW:0,MEDIUM:0,HIGH:0,CRITICAL:0};cases.forEach(c=>{const r=riskOf(c);if(riskCounts[r]!==undefined)riskCounts[r]++;});
+    return { total_requests:cases.length, completed:counts.COMPLETE, incomplete:counts.INCOMPLETE, not_applicable:counts.NOT_APPLICABLE, remaining_records:findings.length, active_flows:findings.filter(x=>x.operation==='REPORT_ACTIVE_DATA_FLOW').length, restore_risks:findings.filter(x=>x.operation==='REPORT_RESTORE_RISK').length, high_risk_cases:cases.filter(c=>['HIGH','CRITICAL'].includes(riskOf(c))).length, risk_distribution:riskCounts, by_system:Object.fromEntries([...new Set(findings.map(f=>f.system_id))].map(s=>[s,findings.filter(f=>f.system_id===s).length])), recent:cases.slice(-10) };
   }
   export() {
     const rows=this.all().slice().sort((a,b)=>a.case_id.localeCompare(b.case_id));
@@ -235,7 +237,7 @@ const server = http.createServer((req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
   const url=new URL(req.url,'http://localhost'); const parts=url.pathname.split('/').filter(Boolean);
   const json=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
-  if(url.pathname==='/api/health') return json(200,{status:'ok',product:'GHOSTPRINTS',requests:app.requests.length,evidence_files:app.manifest.length});
+  if(url.pathname==='/api/health') return json(200,{status:'ok',product:'GHOSTGUARD',requests:app.requests.length,evidence_files:app.manifest.length});
   if(url.pathname==='/api/dashboard/summary') return json(200,app.dashboard());
   if(url.pathname==='/api/datasets') return json(200,[{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,files:app.manifest}]);
   if(url.pathname==='/api/datasets/official-challenge') return json(200,{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,manifest:app.manifest,missing:app.manifest.filter(f=>!f.readable)});
@@ -243,17 +245,32 @@ const server = http.createServer((req,res)=>{
   if(url.pathname==='/api/investigations') {
     const q=norm(url.searchParams.get('q')||''); const status=url.searchParams.get('status');
     const out=app.all().filter(c=>{const r=app.requests.find(x=>x.case_id===c.case_id); return (!status||c.deletion_status===status)&&(!q||norm([c.case_id,r?.email,r?.request_text].join(' ')).includes(q));});
-    const offset=Math.max(0,Number(url.searchParams.get('offset')||0)); const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit')||25)));
-    return json(200,{total:out.length,items:out.slice(offset,offset+limit)});
+    const offset=Math.max(0,Number(url.searchParams.get('offset')||0)); const limit=Math.min(1000,Math.max(1,Number(url.searchParams.get('limit')||25)));
+    return json(200,{total:out.length,items:out.slice(offset,offset+limit).map(c=>({...c,request:app.requests.find(r=>r.case_id===c.case_id)}))});
   }
   if(parts[0]==='api'&&parts[1]==='investigations'&&parts[2]) {
     const c=app.all().find(x=>x.case_id===parts[2]); if(!c) return json(404,{error:'Case not found'});
+    const request=app.requests.find(x=>x.case_id===c.case_id);
+    const identity=[...app.identities.values()].find(p=>p.identifiers.has(norm(request?.email)));
+    const evidenceIds=[...new Set((c.steps||[]).map(s=>s.evidence_id).filter(Boolean))];
+    if(parts[3]==='identity') return json(200,{user_id:identity?.user_id||'',current_email:identity?.email||'',historical_emails:identity?.history.filter(a=>/email/i.test(a.field||'')).flatMap(a=>[a.old_value,a.new_value]).filter(Boolean).filter(v=>norm(v)!==norm(identity?.email))||[],resolution_status:identity?'RESOLVED':'UNRESOLVED',evidence_ids:evidenceIds});
+    if(parts[3]==='findings') return json(200,c.steps.filter(s=>s.phase==='FINDING').map(s=>{
+      const source=app.evidence.find(e=>e.file_id===s.evidence_id);let excerpt='';
+      if(source?.text){const at=source.text.toLocaleLowerCase('en-US').indexOf(String(s.resource_id||'').toLocaleLowerCase('en-US'));if(at>=0)excerpt=source.text.slice(Math.max(0,at-100),Math.min(source.text.length,at+420)).replace(/\s+/g,' ').trim();}
+      return {...s,data_category:'',evidence_excerpt:excerpt};
+    }));
+    if(parts[3]==='verification') return json(200,c.steps.filter(s=>s.phase==='VERIFICATION'));
+    if(parts[3]==='certificate') return json(200,{case_id:c.case_id,eligible:c.deletion_status==='COMPLETE',evidence_ids:evidenceIds,hash_scope:'recorded evidence references and step metadata'});
     if(parts[3]==='evidence') return json(200,{case_id:c.case_id,items:c.steps.map(s=>s.evidence_id).filter(Boolean).map(id=>app.manifest.find(f=>f.file_id===id)).filter(Boolean)});
     if(parts[3]==='timeline') return json(200,{case_id:c.case_id,request:app.requests.find(x=>x.case_id===c.case_id),steps:c.steps});
-    if(parts[3]==='graph') return json(200,{nodes:c.steps.map(s=>({id:s.resource_id,label:s.resource_id,system_id:s.system_id,state:s.state,evidence_id:s.evidence_id})),edges:[]});
+    if(parts[3]==='graph') return json(200,{nodes:c.steps.filter(s=>s.evidence_id).map(s=>({id:s.resource_id,label:s.resource_id,system_id:s.system_id,state:s.state,evidence_id:s.evidence_id})),edges:[]});
     if(parts[3]==='risks') return json(200,c.steps.filter(s=>s.phase==='FINDING'));
     if(parts[3]==='remediation') return json(200,c.steps.filter(s=>s.phase!=='FINDING'));
     return json(200,{...c,request:app.requests.find(x=>x.case_id===c.case_id)});
+  }
+  if(url.pathname==='/api/risk-analysis') {
+    const findings=app.all().flatMap(c=>c.steps.filter(s=>s.phase==='FINDING').map(s=>({...s,case_id:c.case_id})));
+    return json(200,{findings,active_flows:findings.filter(s=>s.operation==='REPORT_ACTIVE_DATA_FLOW').length,restore_risks:findings.filter(s=>s.operation==='REPORT_RESTORE_RISK').length});
   }
   if(url.pathname==='/api/reports/export') { const body=app.export(); res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="output.csv"'}); return res.end(body); }
   if(url.pathname==='/api/evidence') return json(200,app.manifest);
@@ -287,6 +304,15 @@ if (require.main===module) {
     const id=process.argv[process.argv.indexOf('--debug-one')+1];const request=app.sample.find(x=>x.case_id===id);const profile=[...app.identities.values()].find(p=>p.identifiers.has(norm(request?.email)));
     console.log(JSON.stringify({request,profile:profile&&{user_id:profile.user_id,identifiers:[...profile.identifiers]},observations:profile&&(app.observationIndex.get(profile.user_id)||[]).map(o=>({file_id:o.evidence.file_id,captured_at:o.evidence.captured_at,resource:o.resource,object:o.object})),result:request&&app.analyze(request)},null,2));
   }
-  else server.listen(PORT,()=>console.log(`GHOSTPRINTS listening on http://localhost:${PORT}`));
+  else {
+    server.on('error',error=>{
+      if(error.code==='EADDRINUSE'&&!process.env.PORT){
+        const busy=PORT;PORT+=1;console.warn(`Port ${busy} is occupied; trying ${PORT}. Set PORT to choose another port.`);server.listen(PORT);return;
+      }
+      console.error(`GHOSTGUARD could not listen on port ${PORT}: ${error.message}`);process.exitCode=1;
+    });
+    server.on('listening',()=>console.log(`GHOSTGUARD listening on http://localhost:${server.address().port}`));
+    server.listen(PORT);
+  }
 }
 module.exports={Ghostprints,csv,deletionIntent,parseSqlValues,parseSqlSchema};

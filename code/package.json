@@ -1,9 +1,10 @@
 {
-  "name": "ghostprints",
+  "name": "ghostguard",
   "version": "1.0.0",
   "private": true,
-  "description": "Local evidence-first deletion audit workspace for HackerRank Orchestrate October 2026",
+  "description": "Evidence-first deletion audit workspace",
   "scripts": {
+    "dev": "node server.js",
     "start": "node server.js",
     "export": "node server.js --export",
     "test": "node --test test/*.test.js",

@@ -14,6 +14,14 @@ Read [`problem_statement.md`](./problem_statement.md) for the complete challenge
 
 ## Quick Start
 
+To launch the local GHOSTGUARD web application from the repository root, run:
+
+```bash
+npm run dev
+```
+
+Then open `http://localhost:8000`. The root `package.json` starts the built-in Node.js server; no dependency installation is required.
+
 Clone the repository and move into the project directory:
 
 ```bash

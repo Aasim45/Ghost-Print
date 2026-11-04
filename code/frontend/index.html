@@ -3,35 +3,45 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#080d16" />
-  <title>GHOSTPRINTS — Deletion Intelligence</title>
+  <meta name="theme-color" content="#f7f8fa" />
+  <title>GHOSTGUARD — Data Deletion Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <div class="shell">
+  <div class="app-shell">
     <aside class="sidebar" id="sidebar">
-      <a class="brand" href="#dashboard" aria-label="GHOSTPRINTS home"><span class="brand-mark">G</span><span>GHOSTPRINTS<small>DELETION INTELLIGENCE</small></span></a>
+      <a class="brand" href="#overview"><span class="brand-mark">G</span><span class="brand-copy"><b>GHOSTGUARD</b><small>Data Deletion Intelligence</small></span></a>
       <div class="nav-label">WORKSPACE</div>
-      <nav>
-        <a href="#dashboard" data-view="dashboard" class="nav-link active"><span>◫</span> Overview</a>
-        <a href="#investigations" data-view="investigations" class="nav-link"><span>⌕</span> Investigations <b id="case-count">—</b></a>
-        <a href="#graph" data-view="graph" class="nav-link"><span>⌘</span> Ghost Graph</a>
-        <a href="#risks" data-view="risks" class="nav-link"><span>△</span> Risk analysis</a>
-        <a href="#remediation" data-view="remediation" class="nav-link"><span>✓</span> Remediation</a>
+      <nav class="nav-group" aria-label="Main navigation">
+        <a href="#overview" data-view="overview" class="nav-link active"><span class="nav-icon">◫</span>Overview</a>
+        <a href="#audits" data-view="audits" class="nav-link"><span class="nav-icon">⌕</span>Deletion Audits <b id="case-count">—</b></a>
+        <a href="#lineage" data-view="lineage" class="nav-link"><span class="nav-icon">⌘</span>Data Lineage</a>
+        <a href="#risk" data-view="risk" class="nav-link"><span class="nav-icon">△</span>Risk Analysis</a>
+        <a href="#certificates" data-view="certificates" class="nav-link"><span class="nav-icon">▤</span>Certificates</a>
+        <a href="#reports" data-view="reports" class="nav-link"><span class="nav-icon">↗</span>Reports</a>
       </nav>
-      <div class="nav-label data-label">DATA &amp; REPORTS</div>
-      <nav>
-        <a href="#dataset" data-view="dataset" class="nav-link"><span>▤</span> Dataset manager</a>
-        <a href="#reports" data-view="reports" class="nav-link"><span>⇩</span> Reports &amp; export</a>
-      </nav>
-      <div class="sidebar-foot"><span class="live-dot"></span><span>Local evidence workspace<small id="api-status">Connecting to API…</small></span></div>
+      <div class="nav-label settings-label">PREFERENCES</div>
+      <nav class="nav-group"><a href="#settings" data-view="settings" class="nav-link"><span class="nav-icon">⚙</span>Settings</a></nav>
+      <div class="sidebar-spacer"></div>
+      <div class="user-card"><span class="avatar">SA</span><span><b>Security Administrator</b><small>System Auditor</small></span><button class="icon-button" id="profile-menu" title="Profile settings">···</button></div>
+      <div class="connection"><i class="status-dot"></i><span>Evidence workspace<small id="api-status">Connecting…</small></span></div>
     </aside>
-    <main class="main">
-      <header class="topbar"><button class="menu" id="menu" aria-label="Toggle navigation">☰</button><div class="breadcrumbs">Workspace <span>/</span> <strong id="crumb">Overview</strong></div><div class="top-actions"><span class="secure"><i></i> EVIDENCE MODE</span><span class="avatar">GP</span></div></header>
-      <section class="content" id="app"><div class="loading"><span class="spinner"></span> Loading investigation workspace…</div></section>
-      <footer>GHOSTPRINTS <span>•</span> Participant dataset · Read-only evidence review</footer>
+    <main class="main-area">
+      <header class="topbar">
+        <button class="menu-button" id="menu" aria-label="Toggle navigation">☰</button>
+        <div class="breadcrumbs"><span>Workspace</span><b>/</b><strong id="crumb">Overview</strong></div>
+        <div class="top-actions"><label class="global-search"><span>⌕</span><input id="global-search" placeholder="Search cases or identifiers…" aria-label="Search audits" /><kbd>⌘ K</kbd></label><button class="icon-button notification" id="notifications" title="Notifications">♧<i></i></button><button class="profile-button" id="top-profile"><span class="avatar small-avatar">SA</span><span>Security Administrator</span><span>⌄</span></button></div>
+      </header>
+      <section class="page-content" id="app"><div class="loading"><span class="spinner"></span> Loading GHOSTGUARD…</div></section>
+      <footer><span>GHOSTGUARD</span><i></i> Evidence-backed deletion review <span class="footer-right">Illustrative risk indicators · No external systems modified</span></footer>
     </main>
   </div>
+  <div id="toast-root" aria-live="polite"></div>
+  <script src="/demo-data.js"></script>
+  <script src="/api.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>
