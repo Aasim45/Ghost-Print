@@ -1,4 +1,4 @@
-# GHOSTPRINTS evaluation report
+# GHOSTGUARD evaluation report
 
 ## Evaluation scope
 

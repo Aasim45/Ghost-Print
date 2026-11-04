@@ -1,4 +1,4 @@
-# GHOSTPRINTS usage and cost report
+# GHOSTGUARD usage and cost report
 
 ## Final full-dataset run
 

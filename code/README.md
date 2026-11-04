@@ -1,49 +1,47 @@
-# GHOSTPRINTS
+# GHOSTGUARD
 
-Local, evidence-first deletion-audit workspace for HackerRank Orchestrate October 2026.
+A responsive, evidence-first deletion audit workspace for the HackerRank Orchestrate dataset. The local UI is served by a small Node.js service and reads participant-facing files from `dataset/`. No external systems are modified and proposed remediation is never shown as completed work.
 
-## Requirements
+## Run locally
 
-- Node.js 20 or later
-- The challenge's `dataset/` directory beside `code/`
+Requires Node.js 20 or later. No package installation is required.
 
-This workspace has no Python installation. The delivered prototype therefore uses Node.js built-ins and does not require `npm install`. It reads the challenge dataset in place and never modifies the source evidence.
-
-## Run the application
-
-From the repository root:
-
-```powershell
-node code/server.js
+```bash
+npm run dev
 ```
 
-Open `http://localhost:8000`. To write the challenge output at repository root:
+Open the URL printed by the server (normally <http://localhost:8000>). If that port is already occupied, the server automatically tries the next port and prints the new URL. You can also choose a port with `PORT=8080 npm run dev`. The UI includes Overview, Deletion Audits, individual audit details, Data Lineage, Risk Analysis, Certificates, Reports, and Settings. Search, filtering, sorting, pagination, evidence expanders, local integrity hashing, CSV downloads, and print-to-PDF are available.
 
-```powershell
+To set the required challenge output at repository root:
+
+```bash
 node code/server.js --export
 ```
 
-To run the automated checks:
+`npm run dev` is configured by the repository-root `package.json` and works from `/workspaces/Ghost-Print`; no `npm install` step is needed.
 
-```powershell
-node --test code/test/*.test.js
-```
+## FastAPI integration
 
-## API
+The browser service adapter is `frontend/api.js`; illustrative display-only examples live separately in `frontend/demo-data.js`. It expects the following routes, matching the local Node service. Set `window.GHOSTGUARD_API_BASE` before `/api.js` loads to point the client to another origin.
 
 - `GET /api/health`
 - `GET /api/dashboard/summary`
-- `GET /api/datasets` and `GET /api/datasets/official-challenge`
 - `GET /api/investigations?q=&status=&offset=&limit=`
-- `POST /api/investigations/run`
 - `GET /api/investigations/{case_id}`
-- `GET /api/investigations/{case_id}/evidence|timeline|graph|risks|remediation`
+- `GET /api/investigations/{case_id}/identity|findings|remediation|verification|graph|risks|certificate`
+- `GET /api/datasets/official-challenge`
+- `GET /api/risk-analysis`
 - `GET /api/reports/export`
 
-The API serves the bundled frontend. API errors use JSON and appropriate HTTP status codes.
+The UI consumes service responses through `GhostguardAPI`; mock records are not coupled to components. The current backend returns evidence-linked observation nodes but no lineage edges when the supplied evidence does not establish a relationship. Risk score is a disclosed prioritization heuristic, not a legal privacy guarantee.
 
-## Important implementation limits
+## Evidence and integrity boundaries
 
-This is a runnable prototype, not a complete production or challenge-accuracy claim. It reads structured JSON and exact identifier occurrences in text evidence, and respects manifest capture time as a conservative cutoff. PDF/image OCR, SQL table reconstruction, complete temporal event interpretation, all policy conditions, graph edge verification, upload, SQLite persistence, and complete evaluation are not implemented yet. Missing verification is never represented as proof of absence. Some output cases can therefore be incomplete without a concrete remediation step, and generated predictions must be reviewed before submission.
+- Audit state is evaluated at the request's `audit_at` cutoff.
+- Missing or unsupported evidence is not proof that data is gone.
+- Findings cite evidence references from the generated audit steps.
+- Remediation actions are recommendations only; the app cannot access customer systems.
+- Hash-chain checks cover recorded audit metadata and evidence references. They do not prove deletion from the underlying systems.
+- Example organization and activity labels are illustrative.
 
-No external system is modified. No LLM credentials are required. Proposed operations are not presented as executed actions. Findings cite manifest `file_id` values; future remediation and follow-up checks use empty evidence IDs.
+Run the challenge's structural validation with `node code/validate-output.js` after generating `output.csv`.

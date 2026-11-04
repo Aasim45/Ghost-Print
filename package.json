@@ -1,0 +1,15 @@
+{
+  "name": "ghostguard-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local launcher for the GHOSTGUARD deletion audit workspace",
+  "scripts": {
+    "dev": "node code/server.js",
+    "start": "node code/server.js",
+    "export": "node code/server.js --export",
+    "validate": "node code/validate-output.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
