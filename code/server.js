@@ -2,6 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { fileURLToPath } = require('node:url');
+const { configuration: aiConfiguration, explainCase } = require('./ai-provider');
 
 const ROOT = path.resolve(__dirname, '..');
 const DATA = path.join(ROOT, 'dataset');
@@ -74,6 +75,20 @@ function identityIndex() {
   }
   return byId;
 }
+function identifiersAt(profile, cutoff) {
+  const values = new Set(profile.user_id ? [norm(profile.user_id)] : []);
+  const snapshot = iso(profile.updated_at);
+  if (!cutoff || (snapshot && snapshot <= cutoff)) {
+    for (const key of ['email','email_hash','phone','name']) if (profile[key]) values.add(norm(profile[key]));
+  }
+  for (const event of profile.history) {
+    const time = iso(event.event_time);
+    if (cutoff && (!time || time > cutoff)) continue;
+    if (!['email','email_hash','phone','name'].includes(norm(event.field_name))) continue;
+    for (const key of ['old_value','new_value']) if (event[key]) values.add(norm(event[key]));
+  }
+  return values;
+}
 function evidenceMatches(profile, evidence) {
   const ids = profile.identifiers;
   const terms = evidence.parsed ? flatValues(evidence.parsed) : evidence.text.split(/\r?\n/).map(x => ['', x]);
@@ -100,7 +115,7 @@ function observations(profile, evidence) {
   else for(const line of evidence.text.split(/\r?\n/)){
     const terms=[...wanted].filter(x=>x&&line.toLocaleLowerCase('en-US').includes(x));
     if(!terms.length)continue;
-    const ids=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[A-Za-z0-9_-]+\b/g)||[];
+    const ids=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[0-9][A-Za-z0-9_-]*\b/g)||[];
     for(const resource of new Set(ids))out.push({resource,object:{line},hits:terms.map(value=>['identifier',value])});
   }
   return out;
@@ -111,6 +126,80 @@ function sortSteps(steps) {
   return steps.sort((a,b) => phase[a.phase]-phase[b.phase] || operationRank.get(a.operation)-operationRank.get(b.operation) || a.system_id.localeCompare(b.system_id) || a.resource_id.localeCompare(b.resource_id));
 }
 function makeStep(phase, system, resource, operation, state, evidence) { return { step_no: 0, phase, system_id: system || 'unknown', resource_id: resource || 'unknown', operation, state, evidence_id: evidence || '' }; }
+const RESOURCE_ID_RE=/^(?:account|search|support|analytics|telemetry|export|backup|audit_record|data_flow|archive|cache|replica|attachment|message|job|marketing|tombstone)_[A-Za-z0-9_-]*\d[A-Za-z0-9_-]*$/i;
+function isResourceId(value){return typeof value==='string'&&RESOURCE_ID_RE.test(value);}
+function lineageState(record) {
+  const direct=[record?.record_state,record?.state,record?.status,record?.deletion_state,record?.operation_result,record?.result].filter(x=>typeof x==='string').join(' ').toUpperCase();
+  const line=typeof record?.line==='string'?record.line.toUpperCase():'';const text=`${direct} ${line}`;
+  for(const state of ['ANONYMIZED','ANONYMISED','REDACTED','NOT_FOUND','ABSENT','DELETED','IDENTIFIABLE','PRESENT','FOUND','ACTIVE','ENABLED','RUNNING','RESTORABLE','AVAILABLE','BLOCKED','DISABLED']) if(new RegExp(`\\b${state}\\b`).test(text)) return state==='NOT_FOUND'||state==='DELETED'?'ABSENT':state;
+  return 'UNKNOWN';
+}
+function relationCandidates(record,evidenceId,out=[]) {
+  if(Array.isArray(record)){for(const value of record)relationCandidates(value,evidenceId,out);return out;}
+  if(!record||typeof record!=='object')return out;
+  const source=record.source_resource_id||record.from_resource_id||record.parent_resource_id;
+  const target=record.target_resource_id||record.to_resource_id||record.child_resource_id;
+  const type=record.relationship_type||record.relation_type||record.relationship||record.transfer_type||record.event_type;
+  if(isResourceId(source)&&isResourceId(target)&&typeof type==='string'&&type.trim())out.push({source_resource_id:source,target_resource_id:target,type:type.trim().slice(0,80),evidence_id:evidenceId,source_system_id:record.source_system_id||record.source_system||'',target_system_id:record.target_system_id||record.target_system||'',allow_self:record.allow_self_relationship===true});
+  for(const value of Object.values(record))if(value&&typeof value==='object')relationCandidates(value,evidenceId,out);
+  return out;
+}
+function buildLineageGraph(caseResult,request,observations,evidenceFiles) {
+  const caseId=caseResult.case_id,cutoff=request?.audit_at||'', evidenceById=new Map(evidenceFiles.map(x=>[x.file_id,x]));
+  const nodeMap=new Map(),related=[];const key=(system,resource)=>`${system}::${resource}`;
+  const findingIndex=new Map();for(const f of caseResult.findings||[]){const resource=f.resource||f.resource_id,system=f.system||f.system_id;if(isResourceId(resource))findingIndex.set(key(system||'unknown',resource),f);}
+  const stepIndex=new Map();for(const s of caseResult.steps||[]){if(!isResourceId(s.resource_id))continue;const k=key(s.system_id||'unknown',s.resource_id);if(!stepIndex.has(k))stepIndex.set(k,[]);stepIndex.get(k).push(s);}
+  const add=(system,resource,record,evidenceId,category,observedAt)=>{
+    system=String(system||'unknown');resource=String(resource||'');if(!isResourceId(resource))return;
+    const id=key(system,resource),f=findingIndex.get(id),steps=stepIndex.get(id)||[];let node=nodeMap.get(id);
+    if(!node){
+      category=category||f?.category||f?.data_category||'';
+      const name=record?.resource_name||record?.resource_label||category||'Observed resource';
+      node={id,system_id:system,resource_id:resource,resource_name:String(name).slice(0,120),resource_type:String(category||record?.record_type||'Not available').slice(0,80),presence_status:'UNKNOWN',verification_status:'UNKNOWN',verification_operation:'',evidence_ids:[],evidence:[],last_observed_at:'',audit_status:caseResult.deletion_status,audit_cutoff:cutoff,reason:f?.reason||''};nodeMap.set(id,node);
+    }
+    const state=lineageState(record);if(state!=='UNKNOWN')node.presence_status=state;
+    if(f?.state)node.presence_status=f.state;
+    if(evidenceId&&!node.evidence_ids.includes(evidenceId)){
+      node.evidence_ids.push(evidenceId);const file=evidenceById.get(evidenceId);
+      if(file){const label=[file.origin,path.basename(file.file_path||'')].filter(Boolean).join(' · ');node.evidence.push({evidence_id:evidenceId,description:label||'Evidence metadata unavailable',file_path:file.file_path||'',observed_at:file.captured_at||''});}
+    }
+    const timestamp=String(observedAt||'');if(timestamp&&(!node.last_observed_at||iso(timestamp)>iso(node.last_observed_at)))node.last_observed_at=timestamp;
+    const verify=steps.find(s=>s.phase==='VERIFICATION'&&s.evidence_id&&/^VERIFY_/.test(s.operation));
+    const pending=steps.some(s=>s.phase==='REMEDIATION')||Boolean(f);
+    if(verify){node.verification_status='VERIFIED';node.verification_operation=verify.operation;if(['ABSENT','REDACTED','ANONYMIZED','PRESENT','DISABLED','BLOCKED'].includes(verify.state))node.presence_status=verify.state;}
+    else if(pending)node.verification_status='PENDING';
+    else if(!node.evidence_ids.length)node.verification_status='EVIDENCE_UNAVAILABLE';
+    if(record&&typeof record==='object'&&evidenceId)related.push(...relationCandidates(record,evidenceId));
+  };
+  for(const observation of observations){
+    const {evidence,resource,object}=observation;const resourceId=String(object?.resource_id||resource||'');
+    if(!isResourceId(resourceId))continue;
+    const system=observation.system_id||object?.system_id||object?.system||object?.origin_system||object?.source_system||'unknown';
+    const category=object?.data_category||object?.category||object?.record_type||'';
+    const time=object?.observed_at||object?.recorded_at||object?.event_time||object?.timestamp||object?.updated_at||evidence?.captured_at||'';
+    add(system,resourceId,object,evidence?.file_id,category,time);
+  }
+  for(const step of caseResult.steps||[])if(step.evidence_id)add(step.system_id,step.resource_id,null,step.evidence_id,'',evidenceById.get(step.evidence_id)?.captured_at||'');
+  const byResource=new Map();for(const n of nodeMap.values()){if(!byResource.has(n.resource_id))byResource.set(n.resource_id,[]);byResource.get(n.resource_id).push(n);}
+  const resolve=(resource,system)=>{if(system){const n=nodeMap.get(key(system,resource));if(n)return n.id;}const options=byResource.get(resource)||[];return options.length===1?options[0].id:null;};
+  const edgeMap=new Map();for(const rel of related){const source=resolve(rel.source_resource_id,rel.source_system_id),target=resolve(rel.target_resource_id,rel.target_system_id);if(!source||!target||(source===target&&!rel.allow_self))continue;const id=[source,target,rel.type,rel.evidence_id].join('|');edgeMap.set(id,{id,source,target,type:rel.type,evidence_id:rel.evidence_id,description:evidenceById.get(rel.evidence_id)?.file_path||'Evidence metadata unavailable'});}
+  const nodes=[...nodeMap.values()].sort((a,b)=>a.system_id.localeCompare(b.system_id)||a.resource_id.localeCompare(b.resource_id));
+  for(const node of nodes){if(node.evidence.length){const first=node.evidence[0];node.evidence_id=first.evidence_id;node.evidence_description=first.description;}else{node.evidence_id='';node.evidence_description='Not available';}node.last_observed_at=node.last_observed_at||node.evidence[0]?.observed_at||'';}
+  const edges=[...edgeMap.values()].sort((a,b)=>a.source.localeCompare(b.source)||a.target.localeCompare(b.target)||a.type.localeCompare(b.type));
+  return {case_id:caseId,audit_status:caseResult.deletion_status,audit_cutoff:cutoff,nodes,edges,relationship_status:edges.length?'Evidence-supported relationships found':'No verified resource-to-resource relationships were found for this case.'};
+}
+function explainFinding(finding, policyAction = '') {
+  const treatment=policyAction||({REPORT_REMAINING_RECORD:'DELETE',REPORT_EXPOSED_PII:'REDACT'}[finding.op]||'REVIEW');
+  const action=({REPORT_ACTIVE_DATA_FLOW:'DISABLE_DATA_FLOW',REPORT_RESTORE_RISK:'BLOCK_RESTORE'}[finding.op]||treatment);
+  const reasons={
+    REPORT_REMAINING_RECORD:`A matching record is still present in ${finding.system}. The ${finding.category||'identified'} treatment rule requires ${action.toLowerCase()} before this deletion can be complete.`,
+    REPORT_EXPOSED_PII:`A retained or transformable record in ${finding.system} still contains a direct identifier linked to this subject. Policy requires ${action.toLowerCase()} so the record is no longer identifiable.`,
+    REPORT_ACTIVE_DATA_FLOW:`The process resource ${finding.resource} is active in ${finding.system} and may copy or recreate the subject's data. Disable the flow before verifying downstream records.`,
+    REPORT_RESTORE_RISK:`The resource ${finding.resource} in ${finding.system} has an active restore path that may bring deleted data back. Although policy treatment is ${treatment.toLowerCase()}, this restore path must be blocked and verified before deletion can be considered complete.`
+  };
+  const actions={DELETE:'Remove the whole record, then verify it is absent.',REDACT:'Keep only the policy-permitted content and remove direct identifiers, then verify redaction.',ANONYMIZE:'Irreversibly unlink the record from the subject, then verify anonymisation.',DISABLE_DATA_FLOW:'Disable the process, then verify that it cannot copy data.',BLOCK_RESTORE:'Block the restore path, then verify restoration is prevented.'};
+  return {reason:reasons[finding.op]||'The available evidence shows a policy-related issue that needs review.',policy_action:treatment,recommended_action:actions[action]||'Review the applicable policy and collect verification evidence.'};
+}
 
 class Ghostprints {
   constructor() {
@@ -153,7 +242,7 @@ class Ghostprints {
           }
           const candidates=[...(line.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g)||[]),...(line.match(/\buser_\d+\b/gi)||[]),...(line.match(/\b[a-f0-9]{64}\b/gi)||[]),...(line.match(/\+?[\d][\d ()-]{7,}\d/g)||[])];
           if(!candidates.length)continue;
-          const resources=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[A-Za-z0-9_-]+\b/g)||[];
+          const resources=line.match(/\b(?:account|search|support|analytics|telemetry|export|backup|audit_record|message|attachment|cache|replica|archive|job|data_flow)_[0-9][A-Za-z0-9_-]*\b/g)||[];
           for(const resource of new Set(resources))add(e,resource,{line},candidates);
         }
       }
@@ -161,36 +250,59 @@ class Ghostprints {
     return index;
   }
   analyze(req) {
-    if (!deletionIntent(req.request_text)) return { case_id:req.case_id, deletion_status:'NOT_APPLICABLE', steps:[], explanation:'Request text does not clearly authorize deletion.' };
-    const matches = [...this.identities.values()].filter(p => p.identifiers.has(norm(req.email)));
-    if (matches.length !== 1) return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], explanation:matches.length ? 'Identity is ambiguous; findings were not merged.' : 'No unique identity profile could be resolved.' , identity_ambiguous: matches.length > 1 };
-    const profile = matches[0]; const cutoff = iso(req.audit_at); const found = [];
+    if (!deletionIntent(req.request_text)) return { case_id:req.case_id, deletion_status:'NOT_APPLICABLE', steps:[], findings:[], explanation:'Request text does not clearly authorize deletion, so no deletion audit was run.' };
+    const cutoff = iso(req.audit_at);
+    const matches = [...this.identities.values()].filter(p => identifiersAt(p,cutoff).has(norm(req.email)));
+    if (matches.length !== 1) return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], findings:[], explanation:matches.length ? 'The audit is incomplete because more than one identity matches the request. Records were not merged; resolve the identity ambiguity before deciding deletion status.' : 'The audit is incomplete because the request email could not be linked to one identity profile. Resolve the identity before drawing a deletion conclusion.' , identity_ambiguous: matches.length > 1 };
+    const profile = matches[0]; const caseIdentifiers=identifiersAt(profile,cutoff); const found=[],safeChecks=[]; let unresolvedEvidence=false;
     for (const observation of this.observationIndex.get(profile.user_id)||[]) {
       const e=observation.evidence;if(iso(e.captured_at)>cutoff)continue;
+      if(!observation.hits.some(([value])=>caseIdentifiers.has(norm(value))))continue;
       {
         const {resource,object}=observation; const encoded=JSON.stringify(object); const system=this.systemFor(resource,encoded);
-        if (/NOT_FOUND|"deleted"\s*:\s*true|"state"\s*:\s*"ABSENT"/i.test(encoded)) continue;
+        const absent=/NOT_FOUND|"deleted"\s*:\s*true|"(?:state|status|record_state)"\s*:\s*"(?:ABSENT|NOT_FOUND|DELETED)"/i.test(encoded);
         const category=String(object.data_category||object.category||'').toUpperCase();
         const collection=String(object.collection_name||'').toLowerCase();
-        const kind=category||(/customer_profiles/.test(collection)||/account_/.test(resource)?'USER_PROFILE':/search/.test(collection)||/search_/.test(resource)?'SEARCH_INDEX_ENTRY':/analytics|telemetry/.test(collection)||/analytics_|telemetry_/.test(resource)?'ANALYTICS_PROFILE':/support.*attachment|attachment/.test(collection)?'SUPPORT_ATTACHMENT':/support/.test(collection)||/support_/.test(resource)?'SUPPORT_MESSAGE':/export/.test(collection)||/export_/.test(resource)?'USER_EXPORT':/backup|archive/.test(collection)||/backup_|archive_/.test(resource)?'BACKUP_ARCHIVE':/security_audit|audit_record_/.test(collection+' '+resource)?'SECURITY_AUDIT_LOG':'');
+        const kind=category||(/tombstone/.test(collection+' '+resource)?'ACCOUNT_TOMBSTONE':/customer_profiles/.test(collection)||/account_/.test(resource)?'USER_PROFILE':/secondary_identifier/.test(collection+' '+resource)?'SECONDARY_IDENTIFIER':/search/.test(collection)||/search_/.test(resource)?'SEARCH_INDEX_ENTRY':/analytics|telemetry/.test(collection)||/analytics_|telemetry_/.test(resource)?'ANALYTICS_PROFILE':/support.*attachment|attachment/.test(collection)?'SUPPORT_ATTACHMENT':/support/.test(collection)||/support_/.test(resource)?'SUPPORT_MESSAGE':/export/.test(collection)||/export_/.test(resource)?'USER_EXPORT':/backup|archive/.test(collection)||/backup_|archive_/.test(resource)?'BACKUP_ARCHIVE':/marketing/.test(collection+' '+resource)?'MARKETING_PROFILE':/email_delivery/.test(collection+' '+resource)?'EMAIL_DELIVERY_LOG':/security_audit|audit_record_/.test(collection+' '+resource)?'SECURITY_AUDIT_LOG':'');
         const policy=this.policyAction(kind);
-        const isRetained=policy==='RETAIN';
         const hasPII=observation.hits.some(([value])=>norm(value)!==norm(profile.user_id)) || /"(?:email|phone|full_name|name|email_hash)"\s*:\s*"[^"\s]+/i.test(encoded);
-        if(isRetained) continue;
-        if(/data_flow|sync|import/i.test(resource) && /ACTIVE|ENABLED|RUNNING/i.test(encoded)) found.push({resource,system,op:'REPORT_ACTIVE_DATA_FLOW',state:'ACTIVE',evidence:e.file_id,category:kind});
-        else if(/backup|archive/i.test(resource) && /ACTIVE|ENABLED|RESTORABLE/i.test(encoded)) found.push({resource,system,op:'REPORT_RESTORE_RISK',state:'ACTIVE',evidence:e.file_id,category:kind});
-        else if(policy==='DELETE' && /(?:ACTIVE|IDENTIFIABLE|FOUND|PRESENT|SUCCESS)/i.test(encoded)) found.push({resource,system,op:'REPORT_REMAINING_RECORD',state:'PRESENT',evidence:e.file_id,category:kind});
-        else if(policy==='REDACT' && hasPII) found.push({resource,system,op:'REPORT_EXPOSED_PII',state:'PRESENT',evidence:e.file_id,category:kind});
-        else if(policy==='ANONYMIZE' && hasPII) found.push({resource,system,op:'REPORT_EXPOSED_PII',state:'PRESENT',evidence:e.file_id,category:kind});
+        const active=/ACTIVE|ENABLED|RUNNING|RESTORABLE|AVAILABLE|"enabled"\s*:\s*true|"restore_allowed"\s*:\s*true/i.test(encoded);
+        if(/data_flow|sync|import/i.test(resource)) {
+          if(active)found.push({resource,system,op:'REPORT_ACTIVE_DATA_FLOW',state:'ACTIVE',evidence:e.file_id,category:kind||'DATA_FLOW'});
+          else if(/DISABLED|"enabled"\s*:\s*false|"scheduler_registered"\s*:\s*false/i.test(encoded))safeChecks.push(makeStep('VERIFICATION',system,resource,'VERIFY_DATA_FLOW_DISABLED','DISABLED',e.file_id));
+          else unresolvedEvidence=true;
+        } else if(/backup|archive/i.test(resource)) {
+          if(active)found.push({resource,system,op:'REPORT_RESTORE_RISK',state:'ACTIVE',evidence:e.file_id,category:kind||'BACKUP_ARCHIVE'});
+          else if(/BLOCKED|"restore_allowed"\s*:\s*false|"deletion_block"\s*:\s*true/i.test(encoded)) {
+            safeChecks.push(makeStep('VERIFICATION',system,resource,'VERIFY_RESTORE_BLOCKED','BLOCKED',e.file_id));
+            if(policy==='RETAIN')safeChecks.push(makeStep('VERIFICATION',system,resource,'VERIFY_RECORD_PRESENT','PRESENT',e.file_id));
+          } else unresolvedEvidence=true;
+        }
+        else if(!kind||!policy) unresolvedEvidence=true;
+        else if(policy==='RETAIN') {
+          if(!absent)safeChecks.push(makeStep('VERIFICATION',system,resource,'VERIFY_RECORD_PRESENT','PRESENT',e.file_id));
+          else unresolvedEvidence=true;
+        } else if(policy==='DELETE') {
+          if(!absent&&/(?:ACTIVE|IDENTIFIABLE|FOUND|PRESENT|SUCCESS|"deleted"\s*:\s*false)/i.test(encoded))found.push({resource,system,op:'REPORT_REMAINING_RECORD',state:'PRESENT',evidence:e.file_id,category:kind});
+          else if(absent)safeChecks.push(makeStep('VERIFICATION',system,resource,'VERIFY_RECORD_ABSENT','ABSENT',e.file_id));
+          else unresolvedEvidence=true;
+        } else if(policy==='REDACT'||policy==='ANONYMIZE') {
+          if(hasPII)found.push({resource,system,op:'REPORT_EXPOSED_PII',state:'PRESENT',evidence:e.file_id,category:kind});
+          else if(!absent)safeChecks.push(makeStep('VERIFICATION',system,resource,policy==='REDACT'?'VERIFY_RECORD_REDACTED':'VERIFY_RECORD_ANONYMIZED',policy==='REDACT'?'REDACTED':'ANONYMIZED',e.file_id));
+          else unresolvedEvidence=true;
+        } else unresolvedEvidence=true;
       }
     }
     // Activity is contextual only: require a related, independently matched evidence item.
     const steps = [];
     for (const f of dedupe(found)) steps.push(makeStep('FINDING',f.system,f.resource,f.op,f.state,f.evidence));
-    const incomplete = steps.length > 0 || !(this.observationIndex.get(profile.user_id)||[]).some(o=>iso(o.evidence.captured_at)<=cutoff);
+    const matchedByCutoff=(this.observationIndex.get(profile.user_id)||[]).filter(o=>iso(o.evidence.captured_at)<=cutoff&&o.hits.some(([value])=>caseIdentifiers.has(norm(value))));
+    const incomplete = steps.length > 0 || unresolvedEvidence || matchedByCutoff.length===0;
+    if(incomplete && !found.length) return { case_id:req.case_id,deletion_status:'INCOMPLETE',steps:[],findings:[],explanation:`The audit is incomplete because no matching evidence proves the required final state by ${req.audit_at}. This is an evidence gap, not proof of deletion or a confirmed remaining copy.`,missing_evidence:true };
     if (incomplete) {
       for (const f of dedupe(found)) {
-        const op = f.op==='REPORT_ACTIVE_DATA_FLOW'?'DISABLE_DATA_FLOW':f.op==='REPORT_RESTORE_RISK'?'BLOCK_RESTORE':f.category==='ANALYTICS_PROFILE'||f.category==='PRODUCT_TELEMETRY' ? 'ANONYMIZE_RECORD' : f.op === 'REPORT_EXPOSED_PII' ? 'REDACT_RECORD' : 'DELETE_RECORD';
+        const treatment=this.policyAction(f.category);
+        const op = f.op==='REPORT_ACTIVE_DATA_FLOW'?'DISABLE_DATA_FLOW':f.op==='REPORT_RESTORE_RISK'?'BLOCK_RESTORE':({DELETE:'DELETE_RECORD',REDACT:'REDACT_RECORD',ANONYMIZE:'ANONYMIZE_RECORD'}[treatment]||'DELETE_RECORD');
         const state = op === 'REDACT_RECORD' ? 'REDACTED' : op==='ANONYMIZE_RECORD'?'ANONYMIZED':'ABSENT';
         const remediationState=op==='DISABLE_DATA_FLOW'?'DISABLED':op==='BLOCK_RESTORE'?'BLOCKED':state;
         steps.push(makeStep('REMEDIATION',f.system,f.resource,op,remediationState,''));
@@ -198,24 +310,30 @@ class Ghostprints {
         steps.push(makeStep('VERIFICATION',f.system,f.resource,verify,remediationState,''));
       }
     } else if (!incomplete) {
-      const file = this.evidence.find(e => e.file_path.includes('customer_account_handover') && iso(e.captured_at) <= cutoff && norm(e.text).includes(norm(req.email)));
-      if (file) {
-        const line = file.text.split(/\r?\n/).find(x => norm(x).includes(norm(req.email)) && /NOT_FOUND|ANONYMIZED|REDACTED|BLOCKED|DISABLED/i.test(x));
-        if (line) { const m=line.match(/\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|\s*([^|]+)\|/); if(m) steps.push(makeStep('VERIFICATION',m[1].trim(),m[2].trim(),'VERIFY_RECORD_ABSENT','ABSENT',file.file_id)); }
-      }
-      if(!steps.length) return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], explanation:'No policy-compliant verification evidence established the final state by the audit cutoff.', missing_evidence:true };
+      if(!safeChecks.some(s=>s.operation!=='VERIFY_RECORD_PRESENT')) return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], findings:[], explanation:`The audit is incomplete because evidence of retained records alone does not prove the required deletion treatment by ${req.audit_at}.`, missing_evidence:true };
+      steps.push(...safeChecks);
     } else {
-      return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], explanation:'Evidence for this identity is missing or unreadable by the audit cutoff; absence cannot be verified.', missing_evidence:true };
+      return { case_id:req.case_id, deletion_status:'INCOMPLETE', steps:[], findings:[], explanation:`The audit is incomplete because matching evidence is missing or unreadable at the ${req.audit_at} cutoff. This is an evidence gap, not confirmation that data remains or was deleted.`, missing_evidence:true };
     }
     sortSteps(steps); steps.forEach((s,i)=>s.step_no=i+1);
-    return { case_id:req.case_id, deletion_status:incomplete?'INCOMPLETE':'COMPLETE', steps, explanation:incomplete?`${steps.filter(s=>s.phase==='FINDING').length} evidence-linked residual identifier occurrence(s) were found.`:'No direct evidence match was found in the readable evidence available by the audit cutoff; this is not, by itself, proof of absence.' };
+    const findingDetails=dedupe(found).map(f=>({...f,...explainFinding(f,this.policyAction(f.category))}));
+    const affected=[...new Set(findingDetails.map(f=>f.system))];
+    const explanation=incomplete?`The audit is incomplete: ${findingDetails.length} evidence-backed issue(s) were found in ${affected.join(', ')||'the supplied records'}. Open “Why this audit is incomplete” to see each resource, policy treatment, and evidence reference.`:'No policy violation was found in the matched evidence before the audit cutoff; see the verification steps for the evidence references supporting this status.';
+    return { case_id:req.case_id, deletion_status:incomplete?'INCOMPLETE':'COMPLETE', steps, findings:findingDetails, explanation };
   }
   systemFor(resource, context='') {
     const map = [['account','account_service'],['search','search_service'],['support','support_platform'],['analytics','analytics_platform'],['telemetry','analytics_platform'],['export','export_service'],['backup','backup_service'],['audit_record','security_service'],['data_flow','integration_service'],['cache','cache_service'],['archive','archive_service']];
-    return (map.find(([p])=>resource.startsWith(p))||[])[1] || (context.match(/(?:account_service|search_service|support_platform|analytics_platform|security_service|backup_service|export_service|integration_service)/)||[])[0] || 'unknown';
+    return (map.find(([p])=>resource.startsWith(p))||[])[1] || (context.match(/(?:account_service|search_service|support_platform|analytics_platform|security_service|backup_service|export_service|integration_service|identity_service)/)||[])[0] || 'unknown';
   }
   policyAction(category) { return this.rules.find(r=>r.data_category.toUpperCase()===String(category).toUpperCase())?.required_action.toUpperCase()||''; }
-  all() { return this.requests.map(r=>this.results.get(r.case_id)||this.analyze(r)); }
+  lineage(caseResult,request) {
+    const cutoff=iso(request?.audit_at),profiles=[...this.identities.values()].filter(p=>identifiersAt(p,cutoff).has(norm(request?.email)));
+    if(profiles.length!==1)return {case_id:caseResult.case_id,audit_status:caseResult.deletion_status,audit_cutoff:request?.audit_at||'',nodes:[],edges:[],relationship_status:profiles.length?'Identity is ambiguous; resource observations were not combined.':'Identity could not be resolved; no case resources can be safely attributed.'};
+    const identifiers=identifiersAt(profiles[0],cutoff);
+    const observations=(this.observationIndex.get(profiles[0].user_id)||[]).filter(o=>iso(o.evidence.captured_at)<=cutoff&&o.hits.some(([value])=>identifiers.has(norm(value)))).map(o=>({...o,system_id:this.systemFor(o.resource,JSON.stringify(o.object||{}))}));
+    return buildLineageGraph(caseResult,request,observations,this.manifest);
+  }
+  all() { return this.requests.map(r=>{if(!this.results.has(r.case_id))this.results.set(r.case_id,this.analyze(r));return this.results.get(r.case_id);}); }
   run() { for (const r of this.requests) this.results.set(r.case_id,this.analyze(r)); return this.all(); }
   dashboard() {
     const cases=this.all(); const counts={COMPLETE:0,INCOMPLETE:0,NOT_APPLICABLE:0}; cases.forEach(c=>counts[c.deletion_status]++);
@@ -237,7 +355,7 @@ const server = http.createServer((req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
   const url=new URL(req.url,'http://localhost'); const parts=url.pathname.split('/').filter(Boolean);
   const json=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
-  if(url.pathname==='/api/health') return json(200,{status:'ok',product:'GHOSTGUARD',requests:app.requests.length,evidence_files:app.manifest.length});
+  if(url.pathname==='/api/health') { const ai=aiConfiguration(); return json(200,{status:'ok',product:'GHOSTGUARD',requests:app.requests.length,evidence_files:app.manifest.length,ai_configured:ai.enabled,ai_provider:ai.provider,ai_model:ai.model||null}); }
   if(url.pathname==='/api/dashboard/summary') return json(200,app.dashboard());
   if(url.pathname==='/api/datasets') return json(200,[{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,files:app.manifest}]);
   if(url.pathname==='/api/datasets/official-challenge') return json(200,{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,manifest:app.manifest,missing:app.manifest.filter(f=>!f.readable)});
@@ -251,19 +369,27 @@ const server = http.createServer((req,res)=>{
   if(parts[0]==='api'&&parts[1]==='investigations'&&parts[2]) {
     const c=app.all().find(x=>x.case_id===parts[2]); if(!c) return json(404,{error:'Case not found'});
     const request=app.requests.find(x=>x.case_id===c.case_id);
-    const identity=[...app.identities.values()].find(p=>p.identifiers.has(norm(request?.email)));
+    const identity=[...app.identities.values()].find(p=>identifiersAt(p,iso(request?.audit_at)).has(norm(request?.email)));
     const evidenceIds=[...new Set((c.steps||[]).map(s=>s.evidence_id).filter(Boolean))];
-    if(parts[3]==='identity') return json(200,{user_id:identity?.user_id||'',current_email:identity?.email||'',historical_emails:identity?.history.filter(a=>/email/i.test(a.field||'')).flatMap(a=>[a.old_value,a.new_value]).filter(Boolean).filter(v=>norm(v)!==norm(identity?.email))||[],resolution_status:identity?'RESOLVED':'UNRESOLVED',evidence_ids:evidenceIds});
-    if(parts[3]==='findings') return json(200,c.steps.filter(s=>s.phase==='FINDING').map(s=>{
-      const source=app.evidence.find(e=>e.file_id===s.evidence_id);let excerpt='';
-      if(source?.text){const at=source.text.toLocaleLowerCase('en-US').indexOf(String(s.resource_id||'').toLocaleLowerCase('en-US'));if(at>=0)excerpt=source.text.slice(Math.max(0,at-100),Math.min(source.text.length,at+420)).replace(/\s+/g,' ').trim();}
-      return {...s,data_category:'',evidence_excerpt:excerpt};
+    if(parts[3]==='ai-explanation'&&req.method==='POST') { explainCase(c,request).then(result=>json(200,result)).catch(()=>json(502,{error:'AI explanation could not be generated.'})); return; }
+    if(parts[3]==='identity') {
+      const cutoff=iso(request?.audit_at), emailEvents=(identity?.history||[]).filter(a=>norm(a.field_name)==='email'&&(!cutoff||iso(a.event_time)<=cutoff)).sort((a,b)=>iso(a.event_time)-iso(b.event_time));
+      const currentEmail=emailEvents.at(-1)?.new_value||(identity&&(!cutoff||iso(identity.updated_at)<=cutoff)?identity.email:request?.email)||'';
+      const historicalEmails=[...new Set(emailEvents.map(a=>a.old_value).filter(Boolean).filter(v=>norm(v)!==norm(currentEmail)))];
+      return json(200,{user_id:identity?.user_id||'',current_email:currentEmail,historical_emails:historicalEmails,resolution_status:identity?'RESOLVED':'UNRESOLVED',evidence_ids:evidenceIds});
+    }
+    if(parts[3]==='findings') return json(200,(c.findings||[]).map(s=>{
+      const resourceId=s.resource||s.resource_id;const systemId=s.system||s.system_id;const operation=s.op||s.operation;const evidenceId=s.evidence||s.evidence_id;
+      const source=app.evidence.find(e=>e.file_id===evidenceId);let excerpt='';
+      if(source?.text){const at=source.text.toLocaleLowerCase('en-US').indexOf(String(resourceId||'').toLocaleLowerCase('en-US'));if(at>=0)excerpt=source.text.slice(Math.max(0,at-100),Math.min(source.text.length,at+420)).replace(/\s+/g,' ').trim();}
+      const step=c.steps.find(x=>x.phase==='FINDING'&&x.resource_id===resourceId&&x.operation===operation);
+      return {...step,system_id:systemId,resource_id:resourceId,operation,state:s.state,evidence_id:evidenceId,data_category:s.category||s.data_category||'Unclassified',reason:s.reason||'',policy_action:s.policy_action||'',recommended_action:s.recommended_action||'',evidence_excerpt:excerpt};
     }));
     if(parts[3]==='verification') return json(200,c.steps.filter(s=>s.phase==='VERIFICATION'));
     if(parts[3]==='certificate') return json(200,{case_id:c.case_id,eligible:c.deletion_status==='COMPLETE',evidence_ids:evidenceIds,hash_scope:'recorded evidence references and step metadata'});
     if(parts[3]==='evidence') return json(200,{case_id:c.case_id,items:c.steps.map(s=>s.evidence_id).filter(Boolean).map(id=>app.manifest.find(f=>f.file_id===id)).filter(Boolean)});
     if(parts[3]==='timeline') return json(200,{case_id:c.case_id,request:app.requests.find(x=>x.case_id===c.case_id),steps:c.steps});
-    if(parts[3]==='graph') return json(200,{nodes:c.steps.filter(s=>s.evidence_id).map(s=>({id:s.resource_id,label:s.resource_id,system_id:s.system_id,state:s.state,evidence_id:s.evidence_id})),edges:[]});
+    if(parts[3]==='graph'&&req.method==='GET') return json(200,app.lineage(c,request));
     if(parts[3]==='risks') return json(200,c.steps.filter(s=>s.phase==='FINDING'));
     if(parts[3]==='remediation') return json(200,c.steps.filter(s=>s.phase!=='FINDING'));
     return json(200,{...c,request:app.requests.find(x=>x.case_id===c.case_id)});
@@ -315,4 +441,4 @@ if (require.main===module) {
     server.listen(PORT);
   }
 }
-module.exports={Ghostprints,csv,deletionIntent,parseSqlValues,parseSqlSchema};
+module.exports={Ghostprints,csv,deletionIntent,parseSqlValues,parseSqlSchema,explainFinding,buildLineageGraph,isResourceId};

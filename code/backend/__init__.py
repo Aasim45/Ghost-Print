@@ -1,0 +1,1 @@
+"""GHOSTGUARD FastAPI backend package."""

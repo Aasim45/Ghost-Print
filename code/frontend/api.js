@@ -18,6 +18,7 @@
     audit: (id) => request(`/api/investigations/${encodeURIComponent(id)}`),
     identity: (id) => request(`/api/investigations/${encodeURIComponent(id)}/identity`),
     findings: (id) => request(`/api/investigations/${encodeURIComponent(id)}/findings`),
+    aiExplain: (id) => request(`/api/investigations/${encodeURIComponent(id)}/ai-explanation`, { method: 'POST' }),
     remediation: (id) => request(`/api/investigations/${encodeURIComponent(id)}/remediation`),
     verification: (id) => request(`/api/investigations/${encodeURIComponent(id)}/verification`),
     lineage: (id) => request(`/api/investigations/${encodeURIComponent(id)}/graph`),
