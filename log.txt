@@ -1087,3 +1087,122 @@ Correction: the preceding merge-resolution entry was appended with a timestamp l
 
 Merge completion addendum for the 2026-11-04T21:27:25Z entry:
 Created merge commit c4ef81de (Merge origin/main into feature/frontend). The working tree is clean; feature/frontend is ahead of origin/feature/frontend by four commits. No test suite was run.
+
+## [2026-11-05T03:18:41+05:30] SESSION START
+
+tool=Codex
+model=GPT-6
+Repo Root: C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+Branch: unknown
+Worktree: C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+Parent Agent: none
+Language: custom:Node.js and Python
+Time Remaining: not configured
+
+## [2026-11-05T03:49:47+05:30] Implement local Ollama and evidence RAG backend
+
+User Prompt (verbatim, secrets redacted):
+[Pasted text attachment: "# GHOSTGUARD: ADVANCED LOCAL LLM + RAG BACKEND IMPLEMENTATION"; no additional typed request.]
+
+Agent Response Summary:
+Replaced hosted LLM configuration with local-only Ollama/Qwen3 settings and integrated the Node backend with local chat and embeddings. Added exact case/identity/history retrieval, evidence chunking and deduplicated cosine-search cache, cutoff filtering, source provenance, structured model output validation, loopback/origin checks, and evidence-only advisory findings. Deterministic status and remediation output remain authoritative. The Node implementation and packaging were verified; actual Qwen inference and FastAPI execution could not be tested because Ollama and Python are unavailable in this environment.
+
+Actions:
+* Updated code/ai-provider.js, code/rag.js, code/server.js, code/backend/ai_provider.py, code/backend/main.py, code/.env.example, code/.gitignore, code/package.json, code/README.md, and evaluation reports; added local evaluation harness and AI/RAG tests. No frontend files changed.
+* Ran `node --check` on Node modules; 19 Node tests passed. Public sample baseline measured 22/32 statuses, 1/32 exact sequences, 16/193 exact steps, and 314/483 field matches. Regenerated and structurally validated root output.csv (518 rows).
+* Evaluated local-AI integration on 32 sample cases: Ollama connection unavailable, zero inference responses/tokens; no model accuracy claim. Verified live http://localhost:8001 routes: local health unavailable, exact evidence retrieval available, untrusted Origin receives 403.
+* Refreshed code.zip and verified it contains 36 entries and excludes dataset, secrets, databases, uploads, dependency caches, and the local RAG cache.
+* PDF text extraction succeeded for four supplied PDFs via local pdftotext; Tesseract OCR is not installed.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
+
+## [2026-11-05T07:15:32+05:30] Undo local Ollama and RAG backend changes
+
+User Prompt (verbatim, secrets redacted):
+undo the backend changes you did
+
+Agent Response Summary:
+Reverted the code and archive edits from the previous local-Ollama/RAG task to the repository's prior committed state. Preserved the earlier Data Lineage work and the append-only conversation log. Restarted the local Node website on port 8001 using the restored backend.
+
+Actions:
+* Restored code.zip, code/.env.example, code/.gitignore, code/README.md, code/ai-provider.js, code/backend/ai_provider.py, code/backend/main.py, code/evaluation/evaluation_report.md, code/evaluation/usage_report.md, code/package.json, and code/server.js from HEAD.
+* Removed the Ollama/RAG-only additions code/rag.js, code/evaluation/evaluate-local-ai.js, code/evaluation/local_llm_report.json, code/test/ai-provider.test.js, and code/test/rag.test.js.
+* Kept this log append; `git status --short` shows only log.txt modified.
+* Restarted the restored Node backend at http://localhost:8001.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
+
+## [2026-11-05T07:32:05+05:30] Add premium public GhostGuard landing page
+
+User Prompt (verbatim, secrets redacted):
+Create a premium GhostGuard landing page and retain the dashboard's exact visual colour identity. Reuse actual CSS tokens, with deep charcoal, antique gold, bronze, warm ivory, and muted warm neutrals; avoid bright blue, neon, green cybersecurity styling, purple gradients, and white sections.
+
+Agent Response Summary:
+Added a responsive public landing page at `/` using the existing premium design tokens, typefaces, logo identity, and astronomical wallpaper. The existing application remains available at `/dashboard`; calls to action lead to the real workspace and module routes. Documented that the workspace has no sign-in/registration flow rather than adding a fictitious one.
+
+Actions:
+* Added code/frontend/landing.html, landing.css, and landing.js with semantic sections, accessible navigation, reduced-motion handling, responsive styles, an evidence illustration, and a live embedded workspace preview with selectors for existing modules.
+* Updated code/server.js to serve the landing page at `/` and the existing SPA at `/dashboard`; updated code/README.md with both URLs.
+* `node --check server.js` and `node --check frontend/landing.js` succeeded. Live HTTP smoke checks on port 8123 returned 200 for `/`, `/dashboard`, landing assets, premium.css, and wallpaper.svg; all six module links were present. No browser executable was available for screenshot-based visual QA.
+* Restarted the local Node website on port 8001 with the new routes.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
+
+## [2026-11-05T07:36:17+05:30] Darken landing page backgrounds for legibility
+
+User Prompt (verbatim, secrets redacted):
+The landing page content looks too light and is not clearly visible against the background; make the background darker.
+
+Agent Response Summary:
+Darkened the public landing page by removing the full-page wallpaper image and using a solid charcoal base with a restrained plum glow. Replaced the wallpaper behind the principles panel with a dark charcoal/plum surface while preserving the existing antique-gold accents and typography.
+
+Actions:
+* Updated code/frontend/landing.css; kept shared palette tokens, responsive breakpoints, and reduced-motion rules.
+* HTTP checks on the live server confirmed `/`, `/landing.css`, and `/dashboard` return 200; `node --check frontend/landing.js` succeeded.
+* Browser-based screenshot review remains unavailable because no browser executable is installed.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
+
+## [2026-11-05T07:40:17+05:30] Rename website to GHOST PRINT
+
+User Prompt (verbatim, secrets redacted):
+Change the name from GHOUSTGUARD TO GHOST PRINT
+
+Agent Response Summary:
+Renamed user-visible website branding to GHOST PRINT across the public landing page, dashboard, workspace headings, settings organization label, document titles, server health response, and server startup output. Kept internal API/global identifiers unchanged.
+
+Actions:
+* Updated code/frontend/landing.html, landing.js, landing.css, index.html, app.js, server.js, and README.md.
+* `node --check` passed for server.js, frontend/app.js, and frontend/landing.js. HTTP checks on the restarted port 8001 passed for `/`, `/dashboard`, and `/api/health`; each response showed GHOST PRINT branding.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none

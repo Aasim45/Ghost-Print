@@ -355,7 +355,7 @@ const server = http.createServer((req,res)=>{
   if(req.method==='OPTIONS'){res.writeHead(204);return res.end();}
   const url=new URL(req.url,'http://localhost'); const parts=url.pathname.split('/').filter(Boolean);
   const json=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
-  if(url.pathname==='/api/health') { const ai=aiConfiguration(); return json(200,{status:'ok',product:'GHOSTGUARD',requests:app.requests.length,evidence_files:app.manifest.length,ai_configured:ai.enabled,ai_provider:ai.provider,ai_model:ai.model||null}); }
+  if(url.pathname==='/api/health') { const ai=aiConfiguration(); return json(200,{status:'ok',product:'GHOST PRINT',requests:app.requests.length,evidence_files:app.manifest.length,ai_configured:ai.enabled,ai_provider:ai.provider,ai_model:ai.model||null}); }
   if(url.pathname==='/api/dashboard/summary') return json(200,app.dashboard());
   if(url.pathname==='/api/datasets') return json(200,[{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,files:app.manifest}]);
   if(url.pathname==='/api/datasets/official-challenge') return json(200,{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,manifest:app.manifest,missing:app.manifest.filter(f=>!f.readable)});
@@ -401,7 +401,8 @@ const server = http.createServer((req,res)=>{
   if(url.pathname==='/api/reports/export') { const body=app.export(); res.writeHead(200,{'Content-Type':'text/csv; charset=utf-8','Content-Disposition':'attachment; filename="output.csv"'}); return res.end(body); }
   if(url.pathname==='/api/evidence') return json(200,app.manifest);
   if(req.method==='POST'&&url.pathname==='/api/datasets/upload') return json(400,{error:'Upload is disabled for this challenge build. Evidence ingestion is read-only and uses the participant dataset manifest.'});
-  const filename=parts.length?path.resolve(__dirname,'frontend',...parts):path.join(__dirname,'frontend','index.html');
+  const isDashboardRoute=url.pathname==='/dashboard'||url.pathname==='/dashboard/';
+  const filename=url.pathname==='/'?path.join(__dirname,'frontend','landing.html'):isDashboardRoute?path.join(__dirname,'frontend','index.html'):parts.length?path.resolve(__dirname,'frontend',...parts):path.join(__dirname,'frontend','landing.html');
   const rel=path.relative(path.join(__dirname,'frontend'),filename); if(rel.startsWith('..')||path.isAbsolute(rel)) return json(403,{error:'Invalid path'});
   fs.readFile(filename,(err,content)=>{if(err){res.writeHead(404);return res.end('Not found');}res.writeHead(200,{'Content-Type':MIME[path.extname(filename)]||'application/octet-stream'});res.end(content);});
 });
@@ -435,9 +436,9 @@ if (require.main===module) {
       if(error.code==='EADDRINUSE'&&!process.env.PORT){
         const busy=PORT;PORT+=1;console.warn(`Port ${busy} is occupied; trying ${PORT}. Set PORT to choose another port.`);server.listen(PORT);return;
       }
-      console.error(`GHOSTGUARD could not listen on port ${PORT}: ${error.message}`);process.exitCode=1;
+      console.error(`GHOST PRINT could not listen on port ${PORT}: ${error.message}`);process.exitCode=1;
     });
-    server.on('listening',()=>console.log(`GHOSTGUARD listening on http://localhost:${server.address().port}`));
+    server.on('listening',()=>console.log(`GHOST PRINT listening on http://localhost:${server.address().port}`));
     server.listen(PORT);
   }
 }
