@@ -14,6 +14,7 @@ import networkx as nx
 import pandas as pd
 from sqlalchemy import select
 
+from .audit_reasons import explain_audit_status
 from .db import CODE_DIR, Investigation, SessionLocal, UploadedFile
 
 log = logging.getLogger("ghostguard.engine")
@@ -69,13 +70,13 @@ def values_in(value: Any):
                 yield from values_in(child)
             elif child is not None:
                 yield str(key).casefold(), str(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from values_in(child)
 
 
 def field_value(value: Any, names: set[str]):
     return next((v for k, v in values_in(value) if k in names), None)
-    elif isinstance(value, list):
-        for child in value:
-            yield from values_in(child)
 
 
 def _safe_sql_snapshot(script: str) -> list[dict[str, Any]]:
@@ -228,8 +229,11 @@ class AuditEngine:
             return self._make_result(case_id, "NOT_APPLICABLE", request, {}, [], [], "Request text does not authorize deletion.")
         identity, identifiers, resolved = self._resolve(request)
         if resolved != "RESOLVED":
-            return self._make_result(case_id, "INCOMPLETE", request, identity, [], [], "Identity could not be resolved uniquely; no records were merged.")
+            cause = "IDENTITY_AMBIGUOUS" if resolved == "AMBIGUOUS" else "IDENTITY_UNRESOLVED"
+            explanation = explain_audit_status("INCOMPLETE", cause)
+            return self._make_result(case_id, "INCOMPLETE", request, identity, [], [], explanation)
         cutoff = parse_time(request.get("audit_at")); findings=[]; safe_checks=[]
+        matched_evidence_ids=[]; resource_missing_evidence_ids=[]; unsupported_policy={}
         for evidence in self.evidence:
             captured = parse_time(evidence.get("captured_at"))
             if evidence.get("error") or (cutoff and captured and captured > cutoff):
@@ -256,12 +260,19 @@ class AuditEngine:
                     too_late = True
                 if too_late:
                     continue
-                resource = str(record.get("resource_id", record.get("file_id", record.get("activity_id", ""))))
+                if evidence.get("file_id"):
+                    matched_evidence_ids.append(evidence["file_id"])
+                resource_value = record.get("resource_id", record.get("file_id", record.get("activity_id", "")))
+                resource = str(resource_value).strip() if resource_value is not None else ""
                 if not resource:
+                    if evidence.get("file_id"):
+                        resource_missing_evidence_ids.append(evidence["file_id"])
                     continue
                 category = self._category(record, resource)
                 rule = self.rules.get(category, {})
                 treatment = str(rule.get("required_action", "")).upper()
+                if treatment not in {"DELETE", "REDACT", "ANONYMIZE", "RETAIN"}:
+                    unsupported_policy.setdefault(category, set()).add(evidence.get("file_id", ""))
                 system = str(record.get("system_id", record.get("origin_system", record.get("source_system", ""))))
                 system = system or {"USER_PROFILE":"account_service", "SEARCH_INDEX_ENTRY":"search_service", "ANALYTICS_PROFILE":"analytics_platform",
                                     "PRODUCT_TELEMETRY":"analytics_platform", "SUPPORT_MESSAGE":"support_platform", "SUPPORT_ATTACHMENT":"support_platform",
@@ -309,16 +320,29 @@ class AuditEngine:
         elif safe_checks:
             deletion_checks=[x for x in safe_checks if x[2] in {"VERIFY_RECORD_ABSENT","VERIFY_RECORD_REDACTED","VERIFY_RECORD_ANONYMIZED"}]
             if not deletion_checks:
-                return self._make_result(case_id,"INCOMPLETE",request,identity,[],[],"Evidence supports retained records but does not verify deletion treatment.")
+                retained_ids = sorted({item[4] for item in safe_checks if item[4]})
+                explanation = explain_audit_status("INCOMPLETE", "RETAINED_RECORDS_ONLY", evidence_ids=retained_ids)
+                return self._make_result(case_id,"INCOMPLETE",request,identity,[],[],explanation)
             steps=[{"phase":"VERIFICATION","system_id":s,"resource_id":r,"operation":o,"state":st,"evidence_id":eid} for s,r,o,st,eid,_ in safe_checks]
             status="COMPLETE"
         else:
-            return self._make_result(case_id,"INCOMPLETE",request,identity,[],[],"No policy-compliant verification evidence was found by the audit cutoff.")
+            if resource_missing_evidence_ids:
+                explanation = explain_audit_status("INCOMPLETE", "RESOURCE_ID_MISSING",
+                                                  evidence_ids=sorted(set(resource_missing_evidence_ids)))
+            elif unsupported_policy:
+                category = sorted(unsupported_policy)[0]
+                explanation = explain_audit_status("INCOMPLETE", "POLICY_UNAVAILABLE", category=category,
+                                                  evidence_ids=sorted(x for x in unsupported_policy[category] if x))
+            elif not matched_evidence_ids:
+                explanation = explain_audit_status("INCOMPLETE", "NO_MATCHING_EVIDENCE", audit_at=request.get("audit_at", ""))
+            else:
+                explanation = explain_audit_status("INCOMPLETE", "VERIFICATION_INSUFFICIENT",
+                                                  evidence_ids=sorted(set(matched_evidence_ids)))
+            return self._make_result(case_id,"INCOMPLETE",request,identity,[],[],explanation)
         steps.sort(key=lambda s:(PHASE_ORDER[s["phase"]],OPERATION_ORDER.index(s["operation"]),s["system_id"],s["resource_id"]))
         for number, step in enumerate(steps,1): step["step_no"]=number
         clean=[{k:v for k,v in s.items() if k not in {"data_category","evidence_excerpt","_record"}} for s in steps]
-        affected=", ".join(sorted({f["system_id"] for f in findings}))
-        summary=(f"The audit is incomplete: {len(findings)} evidence-backed issue(s) were found in {affected or 'the supplied records'}. Review each reason, policy treatment, and evidence reference below." if findings else
+        summary=(explain_audit_status(status, "FINDINGS", findings=findings) if status == "INCOMPLETE" else
                  f"No policy violation was found in the matched evidence; {len(safe_checks)} supported observations are listed in the verification steps.")
         return self._make_result(case_id,status,request,identity,clean,findings,summary)
 
