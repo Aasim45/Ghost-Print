@@ -357,6 +357,10 @@ const server = http.createServer((req,res)=>{
   const json=(code,value)=>{res.writeHead(code,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify(value));};
   if(url.pathname==='/api/health') { const ai=aiConfiguration(); return json(200,{status:'ok',product:'GHOST PRINT',requests:app.requests.length,evidence_files:app.manifest.length,ai_configured:ai.enabled,ai_provider:ai.provider,ai_model:ai.model||null}); }
   if(url.pathname==='/api/dashboard/summary') return json(200,app.dashboard());
+  if(url.pathname==='/api/forensics/aggregate') {
+    const cases=app.all();
+    return json(200,{total:cases.length,items:cases.map(c=>{const request=app.requests.find(r=>r.case_id===c.case_id)||{};return {case_id:c.case_id,deletion_status:c.deletion_status,risk_level:c.risk_level||'UNKNOWN',request:{requested_at:request.requested_at||'',audit_at:request.audit_at||''},steps:(c.steps||[]).map(s=>({step_no:s.step_no,phase:s.phase,system_id:s.system_id,resource_id:s.resource_id,operation:s.operation,state:s.state,evidence_id:s.evidence_id||''}))}})});
+  }
   if(url.pathname==='/api/datasets') return json(200,[{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,files:app.manifest}]);
   if(url.pathname==='/api/datasets/official-challenge') return json(200,{dataset_id:'official-challenge',request_count:app.requests.length,evidence_count:app.manifest.length,manifest:app.manifest,missing:app.manifest.filter(f=>!f.readable)});
   if(url.pathname==='/api/investigations/run' && req.method==='POST') return json(200,{processed:app.requests.length,results:app.run().length});
@@ -373,10 +377,15 @@ const server = http.createServer((req,res)=>{
     const evidenceIds=[...new Set((c.steps||[]).map(s=>s.evidence_id).filter(Boolean))];
     if(parts[3]==='ai-explanation'&&req.method==='POST') { explainCase(c,request).then(result=>json(200,result)).catch(()=>json(502,{error:'AI explanation could not be generated.'})); return; }
     if(parts[3]==='identity') {
-      const cutoff=iso(request?.audit_at), emailEvents=(identity?.history||[]).filter(a=>norm(a.field_name)==='email'&&(!cutoff||iso(a.event_time)<=cutoff)).sort((a,b)=>iso(a.event_time)-iso(b.event_time));
-      const currentEmail=emailEvents.at(-1)?.new_value||(identity&&(!cutoff||iso(identity.updated_at)<=cutoff)?identity.email:request?.email)||'';
-      const historicalEmails=[...new Set(emailEvents.map(a=>a.old_value).filter(Boolean).filter(v=>norm(v)!==norm(currentEmail)))];
-      return json(200,{user_id:identity?.user_id||'',current_email:currentEmail,historical_emails:historicalEmails,resolution_status:identity?'RESOLVED':'UNRESOLVED',evidence_ids:evidenceIds});
+      const cutoff=iso(request?.audit_at), history=(identity?.history||[]).filter(a=>!cutoff||!iso(a.event_time)||iso(a.event_time)<=cutoff), emailEvents=history.filter(a=>norm(a.field_name)==='email').sort((a,b)=>iso(a.event_time)-iso(b.event_time));
+      const snapshotInScope=Boolean(identity&&(!cutoff||!iso(identity.updated_at)||iso(identity.updated_at)<=cutoff));
+      const currentEmail=emailEvents.at(-1)?.new_value||(snapshotInScope?identity.email:request?.email)||'';
+      const historicalEmails=[...new Set(emailEvents.flatMap(a=>[a.old_value,a.new_value]).filter(Boolean).filter(v=>norm(v)!==norm(currentEmail)))];
+      const historicalIdentifiers={},knownIdentifiers=new Set(identity?.user_id?[identity.user_id]:[]);
+      if(snapshotInScope)for(const field of ['email','name','phone','email_hash'])if(identity?.[field])knownIdentifiers.add(identity[field]);
+      for(const event of history){const field=norm(event.field_name);if(!['email','name','phone','email_hash'].includes(field))continue;if(!historicalIdentifiers[field])historicalIdentifiers[field]=new Set();for(const key of ['old_value','new_value'])if(event[key]){historicalIdentifiers[field].add(event[key]);knownIdentifiers.add(event[key]);}}
+      if(currentEmail&&historicalIdentifiers.email)historicalIdentifiers.email.delete(currentEmail);
+      return json(200,{user_id:identity?.user_id||'',current_email:currentEmail,historical_emails:historicalEmails,historical_identifiers:Object.fromEntries(Object.entries(historicalIdentifiers).map(([key,values])=>[key,[...values]]).filter(([,values])=>values.length)),known_identifiers:[...knownIdentifiers],resolution_status:identity?'RESOLVED':'UNRESOLVED',evidence_ids:evidenceIds});
     }
     if(parts[3]==='findings') return json(200,(c.findings||[]).map(s=>{
       const resourceId=s.resource||s.resource_id;const systemId=s.system||s.system_id;const operation=s.op||s.operation;const evidenceId=s.evidence||s.evidence_id;

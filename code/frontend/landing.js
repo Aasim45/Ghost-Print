@@ -32,7 +32,7 @@
   previewButtons.forEach(button => button.addEventListener('click', () => {
     if (!frame) return;
     const view = button.dataset.preview;
-    if (!/^(overview|audits|lineage|risk|certificates|reports)$/.test(view || '')) return;
+    if (!/^(overview|audits|lineage|risk|forensics|certificates|reports)$/.test(view || '')) return;
     previewButtons.forEach(item => item.setAttribute('aria-pressed', String(item === button)));
     frame.title = `Live preview of the Ghost Print ${button.textContent.trim()} dashboard`;
     frame.src = `/dashboard#${view}`;

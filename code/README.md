@@ -10,7 +10,7 @@ Requires Node.js 20 or later. No package installation is required.
 npm run dev
 ```
 
-Open the URL printed by the server (normally <http://localhost:8000>) for the public Ghost Print landing page. Choose **Enter workspace** or open <http://localhost:8000/dashboard> to use the existing application. If that port is already occupied, the server automatically tries the next port and prints the new URL. You can also choose a port with `PORT=8080 npm run dev`. The workspace includes Overview, Deletion Audits, individual audit details, Data Lineage, Risk Analysis, Certificates, Reports, and Settings. Search, filtering, sorting, pagination, evidence expanders, local integrity hashing, CSV downloads, and print-to-PDF are available. The project does not configure sign-in or registration; the landing page links directly to the workspace.
+Open the URL printed by the server (normally <http://localhost:8000>) for the public Ghost Print landing page. Choose **Enter workspace** or open <http://localhost:8000/dashboard> to use the existing application. If that port is already occupied, the server automatically tries the next port and prints the new URL. You can also choose a port with `PORT=8080 npm run dev`. The workspace includes Overview, Deletion Audits, individual audit details, Data Lineage, Risk Analysis, Forensics, Certificates, Reports, and Settings. Forensics aggregates evidence-backed case/resource findings across the loaded cases and compares selected audits. Search, filtering, sorting, pagination, evidence expanders, local integrity hashing, CSV downloads, and print-to-PDF are available. The project does not configure sign-in or registration; the landing page links directly to the workspace.
 
 ## Run the FastAPI backend
 
@@ -47,6 +47,7 @@ The browser service adapter is `frontend/api.js`; illustrative display-only exam
 
 - `GET /api/health`
 - `GET /api/dashboard/summary`
+- `GET /api/forensics/aggregate` (case/resource risk counts and audit dates without subject identifiers)
 - `GET /api/investigations?q=&status=&offset=&limit=`
 - `GET /api/investigations/{case_id}`
 - `GET /api/investigations/{case_id}/identity|findings|remediation|verification|graph|risks|certificate`
