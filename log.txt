@@ -1278,3 +1278,43 @@ branch=unknown
 repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
 worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
 parent_agent=none
+
+## [2026-11-05T09:08:00+05:30] Fix aggregate heat-map risk grouping
+
+User Prompt (verbatim, secrets redacted):
+why it is not showing anything [with heat-map screenshot]
+
+Agent Response Summary:
+Explained that cases with a stored UNKNOWN risk were being grouped as UNKNOWN instead of deriving risk from findings, and updated the Forensics aggregate view to derive the case risk when stored risk is absent or UNKNOWN.
+
+Actions:
+* Updated the Forensics heat map, case selectors, drilldown, and comparison header to share the derived risk value.
+* Asked the user to reload the Forensics page to see the corrected grouping. No tests were run.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
+
+## [2026-11-05T09:15:00+05:30] Sync certificate table status after integrity verification
+
+User Prompt (verbatim, secrets redacted):
+it is showing verify integriity but in integrity it is showing not yet verifo\ied [with screenshot]
+
+Agent Response Summary:
+Fixed the certificate row so its integrity label updates when verification runs and reflects unavailable or failed results accurately.
+
+Actions:
+* Updated code/frontend/app.js certificate interactions: the clicked row now shows Verifying, Verified, Unavailable, or Verification failed; the action label reflects whether the recorded inputs verified.
+* No tests were run.
+
+Context:
+tool=Codex
+model=GPT-6
+branch=unknown
+repo_root=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+worktree=C:\Users\tania\OneDrive\Documents\Pictures\Desktop\HACKOWEEN\hackerrank-orchestrate-october26
+parent_agent=none
